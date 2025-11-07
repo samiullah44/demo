@@ -1,0 +1,18 @@
+{
+  "name": "Unknown",
+  "inscription_number": "Unknown",
+  "price": "0.01049 BTC",
+  "owner": "bc1pku0fuj3r8szhj28g6dxzw44n06whun7ckfhg0e6zal4vndcvk4gqdglplz",
+  "content_type": "text/plain;charset=utf-8",
+  "created": "2/3/2023, 11:45:03 AM",
+  "location": "4cb7911e0a5319be2b42ef8f3ea4f916873eafe575995c5cb5e16a425a55f33c:0:0",
+  "inscription_id": "a098723444721c4b2e21a5e645d748f23bbf830aac2da1dfd52c47b1cfafef3fi0",
+  "rarity": "common",
+  "sat_number": "1608066300486758",
+  "sat_name": "clordltiigh",
+  "genesis_transaction": "a098723444721c4b2e21a5e645d748f23bbf830aac2da1dfd52c47b1cfafef3f",
+  "full_details_text": "These are the 21 immutable laws of the big crypto business.\nInscription Details\nInscription ID\n\u25c9\na098...3fi0\nInscription Number\n1346\nOwner\nbc1p...lplz\nContent\n\u25c9\nLink\nContent Type\ntext/plain;charset=utf-8\nCreated\n2/3/2023, 11:45:03 AM\nGenesis Transaction\n\u25c9\na098...ef3f\nGenesis Transaction Block\n\u25c9\n774903\nLocation\n\u25c9\n4cb7...:0:0\nLocation Block\n\u25c9\n919978\nOutput\n\u25c9\n4cb7...3c:0\nSat Details\nRarity\ncommon\nSat Number\n\u25c9\n1608066300486758\nSat Name\n\u25c9\nclordltiigh\nSat Block\n446453\nSat Block Time\n1/3/2017, 7:43:38 AM",
+  "output": "4cb7911e0a5319be2b42ef8f3ea4f916873eafe575995c5cb5e16a425a55f33c:0",
+  "image_url": "https://ord-mirror.magiceden.dev/content/a098723444721c4b2e21a5e645d748f23bbf830aac2da1dfd52c47b1cfafef3fi0",
+  "scraped_time": "2025-10-28 03:39:09"
+}

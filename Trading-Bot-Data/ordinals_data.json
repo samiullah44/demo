@@ -1,0 +1,72 @@
+[
+  {
+    "index": 1,
+    "name": "Inscription 8805",
+    "inscription_number": "#8805",
+    "image_url": "https://ord-mirror.magiceden.dev/content/30d59db66c7ce4960a37bbd2caedd2d9257c32cd815b1dc28dc91a51be8b1554i0",
+    "price": "0.0059 BTC"
+  },
+  {
+    "index": 2,
+    "name": "Inscription 6896",
+    "inscription_number": "#6896",
+    "image_url": "https://ord-mirror.magiceden.dev/content/4d0afb0149e1f5f40ed40ab1bef770a3476c89d66d6d4683cb7fa70ec299c64ei0",
+    "price": "0.006 BTC"
+  },
+  {
+    "index": 3,
+    "name": "Inscription 6625",
+    "inscription_number": "#6625",
+    "image_url": "https://ord-mirror.magiceden.dev/content/8f4c5c798fb4a9ea47445aa5571c8ec0070fe2c2c866338734abc932c2901ffbi0",
+    "price": "0.007 BTC"
+  },
+  {
+    "index": 4,
+    "name": "Inscription 6271",
+    "inscription_number": "#6271",
+    "image_url": "https://ord-mirror.magiceden.dev/content/74d2b646a02c1c36dfa4afdb4a3a41c48ae28a0a7448b9bd25498e867fa402ebi0",
+    "price": "0.00737 BTC"
+  },
+  {
+    "index": 5,
+    "name": "#1",
+    "inscription_number": "#1",
+    "image_url": "https://ord-mirror.magiceden.dev/content/fcefb51fde40988a7d1d09dc3e5dfda9b4754f5eca173a36378500694edaf6bei0",
+    "price": "0.00749 BTC"
+  },
+  {
+    "index": 6,
+    "name": "Inscription 2889",
+    "inscription_number": "#2889",
+    "image_url": "https://renderer.magiceden.dev/v2/render?id=2cea82f9c3243c406f926dedd945c92d9c885b8698ad01ca3d58534449c8bc00i0&forceResize=true&useObjectTag=false&noBackground=false",
+    "price": "0.0077 BTC"
+  },
+  {
+    "index": 7,
+    "name": "Inscription 6149",
+    "inscription_number": "#6149",
+    "image_url": "https://ord-mirror.magiceden.dev/content/9bca3cf90483a96cd23f990d3df4dd812c0bff3291721460e29dc993d27c1844i0",
+    "price": "0.0078 BTC"
+  },
+  {
+    "index": 8,
+    "name": "Inscription 7157",
+    "inscription_number": "#7157",
+    "image_url": "https://ord-mirror.magiceden.dev/content/61112e9321cd63a4447917ba5be6d4e12ad520036c5102cecb441e04a9345eb1i0",
+    "price": "0.0079 BTC"
+  },
+  {
+    "index": 9,
+    "name": "Egg #67",
+    "inscription_number": "#67",
+    "image_url": "https://ord-mirror.magiceden.dev/content/0cc8c4517b7891d8e8722bd125aaddaebc851ad7842390a4897d29ac6aa447eai0",
+    "price": "0.00799 BTC"
+  },
+  {
+    "index": 10,
+    "name": "21Laws#132",
+    "inscription_number": "#132",
+    "image_url": "Unknown",
+    "price": "0.01049 BTC"
+  }
+]
