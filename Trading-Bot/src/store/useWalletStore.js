@@ -1,5 +1,7 @@
-import { create } from 'zustand';
-import axiosInstance from '../lib/axios';
+import { create } from "zustand";
+import axiosInstance from "../lib/axios";
+
+const VERIFY_MESSAGE = "Verify your wallet ownership to log in to Ordinal Marketplace";
 
 const useWalletStore = create((set, get) => ({
   connected: false,
@@ -7,513 +9,623 @@ const useWalletStore = create((set, get) => ({
   address: null,
   walletType: null,
   publicKey: null,
-  network: 'mainnet',
+  network: "mainnet",
   balance: 0,
   error: null,
 
-  // Connect to Unisat Wallet
-  connectUnisat: async () => {
-    set({ connecting: true, error: null });
+  // ------------------------------
+  // 🔍 Check wallet availability
+  // ------------------------------
+  checkWalletAvailability: () => {
+    if (typeof window === "undefined") return { unisat: false, leather: false, okx: false };
+
+    const unisatAvailable = typeof window.unisat !== "undefined" && typeof window.unisat.requestAccounts === "function";
     
+    // Leather detection
+    let leatherAvailable = false;
+    if (window.LeatherProvider) {
+      leatherAvailable = true;
+    } else if (window.btc) {
+      leatherAvailable = typeof window.btc.request === 'function' || 
+                        typeof window.btc.getAddresses === 'function' ||
+                        typeof window.btc.connect === 'function';
+    }
+
+    // OKX Wallet detection - check multiple possible APIs
+    let okxAvailable = false;
+    if (window.okxwallet) {
+      // Main OKX wallet object
+      okxAvailable = true;
+    } else if (window.bitkeep && window.bitkeep.bitcoin) {
+      // BitKeep (acquired by OKX)
+      okxAvailable = true;
+    } else if (window.$onekey && window.$onekey.btc) {
+      // OneKey wallet (sometimes detected as OKX)
+      okxAvailable = true;
+    }
+
+    return { 
+      unisat: unisatAvailable, 
+      leather: leatherAvailable, 
+      okx: okxAvailable 
+    };
+  },
+
+  // ------------------------------
+  // 🔌 Connect wallet
+  // ------------------------------
+  connectWallet: async (walletType) => {
+    set({ connecting: true, error: null });
     try {
-      if (typeof window.unisat === 'undefined') {
-        throw new Error("Please install Unisat Wallet extension!");
+      switch (walletType) {
+        case "unisat":
+          return await get().connectUnisat();
+        case "leather":
+          return await get().connectLeather();
+        case "okx":
+          return await get().connectOKX();
+        default:
+          throw new Error("Unsupported wallet type");
+      }
+    } catch (error) {
+      set({ connecting: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // ------------------------------
+  // 🟣 OKX Wallet - FIXED IMPLEMENTATION
+  // ------------------------------
+  connectOKX: async () => {
+    // Check for OKX Wallet availability
+    const okx = window.okxwallet || (window.bitkeep && window.bitkeep.bitcoin) || window.$onekey;
+    if (!okx) {
+      throw new Error("OKX Wallet not installed. Please install OKX Wallet first.");
+    }
+
+    try {
+      console.log("Attempting to connect to OKX Wallet...");
+      console.log("OKX wallet object:", okx);
+
+      let address, publicKey, signature;
+
+      // Method 1: Try Bitcoin-specific API first
+      if (okx.bitcoin && okx.bitcoin.request) {
+        console.log("Using OKX Bitcoin API...");
+        try {
+          const accounts = await okx.bitcoin.request({ 
+            method: 'requestAccounts' 
+          });
+          console.log("OKX Bitcoin accounts:", accounts);
+          
+          if (accounts && accounts.length > 0) {
+            address = accounts[0];
+          } else {
+            throw new Error("Please unlock your OKX Wallet and ensure you have Bitcoin accounts");
+          }
+        } catch (btcError) {
+          console.warn("OKX Bitcoin API failed:", btcError);
+          // Try alternative methods
+        }
       }
 
+      // Method 2: Try main request method
+      if (!address && okx.request) {
+        console.log("Using OKX main request API...");
+        try {
+          // Try different method names that OKX might use
+          const methodNames = [
+            'btc_requestAccounts',
+            'requestAccounts', 
+            'eth_requestAccounts', // Sometimes they use ETH method for BTC
+            'account'
+          ];
+
+          for (const method of methodNames) {
+            try {
+              console.log(`Trying method: ${method}`);
+              const accounts = await okx.request({ 
+                method: method 
+              });
+              console.log(`OKX ${method} result:`, accounts);
+              
+              if (accounts && Array.isArray(accounts) && accounts.length > 0) {
+                address = accounts[0];
+                break;
+              } else if (accounts && typeof accounts === 'string') {
+                address = accounts;
+                break;
+              }
+            } catch (methodError) {
+              console.warn(`Method ${method} failed:`, methodError);
+              continue;
+            }
+          }
+
+          if (!address) {
+            throw new Error("Could not retrieve accounts from OKX Wallet. Please make sure your wallet is unlocked.");
+          }
+        } catch (requestError) {
+          console.warn("OKX main request API failed:", requestError);
+        }
+      }
+
+      // Method 3: Try direct properties
+      if (!address && okx.accounts && okx.accounts.length > 0) {
+        console.log("Using OKX direct accounts property...");
+        address = okx.accounts[0];
+      }
+
+      // Method 4: Try getAccounts method
+      if (!address && okx.getAccounts) {
+        console.log("Using OKX getAccounts method...");
+        try {
+          const accounts = await okx.getAccounts();
+          console.log("OKX getAccounts result:", accounts);
+          if (accounts && accounts.length > 0) {
+            address = accounts[0];
+          }
+        } catch (getAccountsError) {
+          console.warn("OKX getAccounts failed:", getAccountsError);
+        }
+      }
+
+      // If we still don't have an address, throw error
+      if (!address) {
+        throw new Error("Could not connect to OKX Wallet. Please make sure:\n1. OKX Wallet is unlocked\n2. You have Bitcoin accounts in your wallet\n3. You approve the connection request");
+      }
+
+      console.log("OKX address retrieved:", address);
+
+      // Get public key
+      try {
+        if (okx.getPublicKey) {
+          publicKey = await okx.getPublicKey();
+        } else if (okx.bitcoin && okx.bitcoin.request) {
+          const pubKeyResult = await okx.bitcoin.request({
+            method: 'getPublicKey'
+          });
+          publicKey = pubKeyResult;
+        } else if (okx.request) {
+          const pubKeyResult = await okx.request({
+            method: 'getPublicKey'
+          });
+          publicKey = pubKeyResult;
+        }
+        console.log("OKX public key:", publicKey);
+      } catch (pubKeyError) {
+        console.warn("Could not get public key from OKX:", pubKeyError);
+      }
+
+      // Sign message for verification
+      try {
+        console.log("Requesting signature from OKX...");
+        
+        const signMethods = [
+          { method: 'signMessage', params: [VERIFY_MESSAGE] },
+          { method: 'btc_signMessage', params: [VERIFY_MESSAGE] },
+          { method: 'personal_sign', params: [VERIFY_MESSAGE, address] },
+          { method: 'eth_sign', params: [address, VERIFY_MESSAGE] }
+        ];
+
+        for (const signMethod of signMethods) {
+          try {
+            if (okx.bitcoin && okx.bitcoin.request) {
+              signature = await okx.bitcoin.request(signMethod);
+            } else if (okx.request) {
+              signature = await okx.request(signMethod);
+            } else if (okx[signMethod.method]) {
+              signature = await okx[signMethod.method](...signMethod.params);
+            }
+            
+            if (signature) {
+              console.log(`OKX signature with ${signMethod.method}:`, signature);
+              break;
+            }
+          } catch (signError) {
+            console.warn(`Sign method ${signMethod.method} failed:`, signError);
+            continue;
+          }
+        }
+      } catch (signError) {
+        console.warn("OKX signing failed:", signError);
+        // Continue without signature
+      }
+
+      // Fetch balance
+      const balanceData = await get().fetchRealBalance(address);
+
+      console.log("OKX balance data:", balanceData);
+
+      // Save to backend
+      if (signature) {
+        await get().saveWalletToBackend({
+          address,
+          wallet_type: "okx",
+          public_key: publicKey,
+          network: "mainnet",
+          signature,
+          message: VERIFY_MESSAGE,
+          balance: balanceData.btcBalance,
+        });
+      }
+
+      set({
+        connected: true,
+        connecting: false,
+        walletType: "okx",
+        address,
+        publicKey,
+        network: "mainnet",
+        balance: balanceData.btcBalance,
+      });
+
+      localStorage.setItem("connectedWalletType", "okx");
+      localStorage.setItem("connectedWalletAddress", address);
+      localStorage.setItem("walletNetwork", "mainnet");
+
+      console.log("Successfully connected to OKX Wallet");
+      
+      return { 
+        address,
+        publicKey, 
+        balance: balanceData.btcBalance,
+      };
+
+    } catch (error) {
+      console.error("OKX Wallet connection error:", error);
+      
+      // Provide user-friendly error messages
+      let userFriendlyError = error.message;
+      if (error.message.includes("rejected") || error.message.includes("denied") || error.message.includes("User denied")) {
+        userFriendlyError = "Connection was rejected. Please approve the connection in your OKX Wallet.";
+      } else if (error.message.includes("unlocked") || error.message.includes("lock")) {
+        userFriendlyError = "Please unlock your OKX Wallet and try again.";
+      } else if (error.message.includes("account") || error.message.includes("No accounts")) {
+        userFriendlyError = "No Bitcoin accounts found. Please make sure you have Bitcoin accounts in your OKX Wallet.";
+      }
+      
+      set({ connecting: false, error: userFriendlyError });
+      throw new Error(userFriendlyError);
+    }
+  },
+
+  // ... rest of the methods remain the same (Unisat, Leather, balance fetching, etc.)
+  // ------------------------------
+  // 💙 Unisat Wallet
+  // ------------------------------
+  connectUnisat: async () => {
+    if (!window.unisat) {
+      throw new Error("Unisat Wallet not installed");
+    }
+
+    try {
       const accounts = await window.unisat.requestAccounts();
+      if (!accounts || accounts.length === 0) throw new Error("No accounts found in Unisat wallet");
+
       const address = accounts[0];
       const publicKey = await window.unisat.getPublicKey();
       const network = await window.unisat.getNetwork();
+      
+      // Fetch balance
       const balance = await window.unisat.getBalance();
       
+      // Sign message for verification
+      const signature = await window.unisat.signMessage(VERIFY_MESSAGE, "bip322-simple");
+
+      // Save to backend
+      await get().saveWalletToBackend({
+        address,
+        wallet_type: "unisat",
+        public_key: publicKey,
+        network,
+        signature,
+        message: VERIFY_MESSAGE,
+        balance: balance.total || balance.confirmed || 0,
+      });
+
       set({
         connected: true,
         connecting: false,
+        walletType: "unisat",
         address,
-        walletType: 'unisat',
         publicKey,
         network,
         balance: balance.total || balance.confirmed || 0,
-        error: null
       });
 
-      await get().saveWalletToBackend({
-        address,
-        wallet_type: 'unisat',
-        public_key: publicKey,
-        network
-      });
+      localStorage.setItem("connectedWalletType", "unisat");
+      localStorage.setItem("connectedWalletAddress", address);
+      localStorage.setItem("walletNetwork", network);
 
-      localStorage.setItem('connectedWalletType', 'unisat');
-      localStorage.setItem('connectedWalletAddress', address);
-
-      return address;
+      return { 
+        address, 
+        publicKey, 
+        network, 
+        balance: balance.total || balance.confirmed || 0,
+      };
     } catch (error) {
-      set({ 
-        error: error.message,
-        connecting: false 
-      });
+      set({ connecting: false, error: error.message });
       throw error;
     }
   },
 
-  // Connect to Xverse Wallet - FIXED
-  connectXverse: async () => {
-    set({ connecting: true, error: null });
-    
-    try {
-      // Xverse wallet detection
-      const isXverseInstalled = 
-        (typeof window.BitcoinProvider !== 'undefined') ||
-        (typeof window.btc !== 'undefined') ||
-        (typeof window.xverse !== 'undefined');
-
-      if (!isXverseInstalled) {
-        throw new Error('Xverse Wallet not installed');
-      }
-
-      let address, publicKey;
-
-      // Try different Xverse connection methods
-      if (window.btc && typeof window.btc.request === 'function') {
-        // Standard btc request method
-        const accounts = await window.btc.request('getAddresses', {});
-        address = accounts[0]?.address;
-        publicKey = await window.btc.request('getPublicKey', {});
-      } else if (window.BitcoinProvider && typeof window.BitcoinProvider.request === 'function') {
-        // Xverse specific API
-        const accounts = await window.BitcoinProvider.request('getAddresses', {});
-        address = accounts[0]?.address;
-        publicKey = await window.BitcoinProvider.request('getPublicKey', {});
-      } else if (window.xverse && typeof window.xverse.request === 'function') {
-        // Alternative Xverse API
-        const accounts = await window.xverse.request('getAddresses', {});
-        address = accounts[0]?.address;
-        publicKey = await window.xverse.request('getPublicKey', {});
-      } else {
-        throw new Error('Xverse Wallet API not available');
-      }
-
-      if (!address) {
-        throw new Error('Could not get address from Xverse wallet');
-      }
-      
-      set({
-        connected: true,
-        connecting: false,
-        address,
-        walletType: 'xverse',
-        publicKey,
-        network: 'mainnet',
-        balance: 0,
-        error: null
-      });
-
-      await get().saveWalletToBackend({
-        address,
-        wallet_type: 'xverse',
-        public_key: publicKey,
-        network: 'mainnet'
-      });
-
-      localStorage.setItem('connectedWalletType', 'xverse');
-      localStorage.setItem('connectedWalletAddress', address);
-
-      return address;
-    } catch (error) {
-      set({ 
-        error: error.message,
-        connecting: false 
-      });
-      throw error;
-    }
-  },
-
-  // Connect to Leather Wallet - FIXED
+  // ------------------------------
+  // 🟠 Leather Wallet
+  // ------------------------------
   connectLeather: async () => {
-    set({ connecting: true, error: null });
-    
-    try {
-      // Leather wallet detection
-      if (typeof window.btc === 'undefined') {
-        throw new Error('Leather Wallet not installed');
-      }
-
-      let address, publicKey;
-
-      // Leather uses the standard btc provider with request method
-      if (typeof window.btc.request === 'function') {
-        address = await window.btc.request('getAddress', {});
-        publicKey = await window.btc.request('getPublicKey', {});
-      } else {
-        throw new Error('Leather Wallet API not available');
-      }
-
-      if (!address) {
-        throw new Error('Could not get address from Leather wallet');
-      }
-      
-      set({
-        connected: true,
-        connecting: false,
-        address,
-        walletType: 'leather',
-        publicKey,
-        network: 'mainnet',
-        balance: 0,
-        error: null
-      });
-
-      await get().saveWalletToBackend({
-        address,
-        wallet_type: 'leather',
-        public_key: publicKey,
-        network: 'mainnet'
-      });
-
-      localStorage.setItem('connectedWalletType', 'leather');
-      localStorage.setItem('connectedWalletAddress', address);
-
-      return address;
-    } catch (error) {
-      set({ 
-        error: error.message,
-        connecting: false 
-      });
-      throw error;
+    const leather = window.LeatherProvider || window.btc;
+    if (!leather) {
+      throw new Error("Leather Wallet not installed");
     }
-  },
 
-  // Connect to Hiro Wallet - FIXED
-  connectHiro: async () => {
-    set({ connecting: true, error: null });
-    
     try {
-      // Hiro wallet detection
-      if (typeof window.btc === 'undefined' && typeof window.StacksProvider === 'undefined') {
-        throw new Error('Hiro Wallet not installed');
+      console.log("Attempting to connect to Leather wallet...");
+
+      let addressObj, publicKey, signature;
+
+      // Try different API methods to get address
+      if (leather.request) {
+        console.log("Using request API...");
+        try {
+          const requestResult = await leather.request('getAddresses');
+          console.log("Leather request result:", requestResult);
+          
+          if (requestResult) {
+            if (Array.isArray(requestResult)) {
+              addressObj = requestResult[0];
+            } else if (requestResult.addresses && Array.isArray(requestResult.addresses)) {
+              addressObj = requestResult.addresses[0];
+            } else if (requestResult.result && requestResult.result.addresses) {
+              addressObj = requestResult.result.addresses[0];
+            }
+          }
+        } catch (requestError) {
+          console.warn("Leather request API failed:", requestError);
+        }
       }
 
-      let address, publicKey;
+      if (!addressObj) {
+        throw new Error("Could not retrieve address from Leather wallet.");
+      }
 
-      // For Bitcoin operations in Hiro
-      if (window.btc && typeof window.btc.request === 'function') {
-        address = await window.btc.request('getAddress', {});
-        publicKey = await window.btc.request('getPublicKey', {});
-      } 
-      // For Stacks operations (if you want to support Stacks)
-      else if (window.StacksProvider && typeof window.StacksProvider.request === 'function') {
-        const accounts = await window.StacksProvider.request({ 
-          method: 'stx_requestAccounts' 
+      console.log("Leather address object retrieved:", addressObj);
+
+      // Extract address string
+      let addressString;
+      if (typeof addressObj === 'string') {
+        addressString = addressObj;
+      } else if (addressObj.address) {
+        addressString = addressObj.address;
+      } else {
+        throw new Error("Invalid address format received from Leather wallet");
+      }
+
+      console.log("Extracted address string:", addressString);
+
+      // Get public key from address object if available
+      if (addressObj.publicKey) {
+        publicKey = addressObj.publicKey;
+      }
+
+      // Get signature
+      try {
+        console.log("Requesting signature for verification...");
+        const signResult = await leather.request('signMessage', {
+          message: VERIFY_MESSAGE,
+          network: 'mainnet'
         });
-        address = accounts[0];
-        // Note: Stacks addresses are different from Bitcoin addresses
-      } else {
-        throw new Error('Hiro Wallet API not available');
+        console.log("Leather sign result:", signResult);
+
+        if (signResult && signResult.result) {
+          publicKey = signResult.result.publicKey || publicKey;
+          signature = signResult.result.signature;
+        }
+      } catch (signError) {
+        console.warn("Leather signing failed:", signError);
       }
 
-      if (!address) {
-        throw new Error('Could not get address from Hiro wallet');
+      // Fetch balance
+      const balanceData = await get().fetchRealBalance(addressString);
+
+      console.log("Real balance data:", balanceData);
+
+      // Save to backend
+      if (signature) {
+        await get().saveWalletToBackend({
+          address: addressString,
+          wallet_type: "leather",
+          public_key: publicKey,
+          network: "mainnet",
+          signature,
+          message: VERIFY_MESSAGE,
+          balance: balanceData.btcBalance,
+        });
       }
-      
+
       set({
         connected: true,
         connecting: false,
-        address,
-        walletType: 'hiro',
+        walletType: "leather",
+        address: addressString,
         publicKey,
-        network: 'mainnet',
-        balance: 0,
-        error: null
+        network: "mainnet",
+        balance: balanceData.btcBalance,
       });
 
-      await get().saveWalletToBackend({
-        address,
-        wallet_type: 'hiro',
-        public_key: publicKey,
-        network: 'mainnet'
-      });
+      localStorage.setItem("connectedWalletType", "leather");
+      localStorage.setItem("connectedWalletAddress", addressString);
+      localStorage.setItem("walletNetwork", "mainnet");
 
-      localStorage.setItem('connectedWalletType', 'hiro');
-      localStorage.setItem('connectedWalletAddress', address);
+      console.log("Successfully connected to Leather wallet");
+      
+      return { 
+        address: addressString,
+        publicKey, 
+        balance: balanceData.btcBalance,
+      };
 
-      return address;
     } catch (error) {
-      set({ 
-        error: error.message,
-        connecting: false 
-      });
+      console.error("Leather connection error:", error);
+      set({ connecting: false, error: error.message });
       throw error;
     }
   },
 
-  // Connect to Magic Eden Wallet - FIXED
-  connectMagic: async () => {
-    set({ connecting: true, error: null });
-    
+  // ------------------------------
+  // 💰 REAL BALANCE FETCHING
+  // ------------------------------
+
+  // Fetch real BTC balance from blockchain API
+  fetchRealBalance: async (address) => {
     try {
-      // Magic Eden wallet detection
-      if (typeof window.magiceden === 'undefined' && typeof window.btc === 'undefined') {
-        throw new Error('Magic Eden Wallet not installed');
-      }
-
-      let address, publicKey;
-
-      // Magic Eden specific API
-      if (window.magiceden && window.magiceden.bitcoin && typeof window.magiceden.bitcoin.request === 'function') {
-        address = await window.magiceden.bitcoin.request('getAddress', {});
-        publicKey = await window.magiceden.bitcoin.request('getPublicKey', {});
-      } 
-      // Fallback to standard btc API
-      else if (window.btc && typeof window.btc.request === 'function') {
-        address = await window.btc.request('getAddress', {});
-        publicKey = await window.btc.request('getPublicKey', {});
-      } else {
-        throw new Error('Magic Eden Wallet API not available');
-      }
-
-      if (!address) {
-        throw new Error('Could not get address from Magic Eden wallet');
+      console.log(`Fetching real balance for address: ${address}`);
+      
+      // Using Blockstream API for Bitcoin mainnet
+      const response = await fetch(`https://blockstream.info/api/address/${address}`);
+      
+      if (!response.ok) {
+        throw new Error(`Blockstream API error: ${response.status}`);
       }
       
-      set({
-        connected: true,
-        connecting: false,
-        address,
-        walletType: 'magic',
-        publicKey,
-        network: 'mainnet',
-        balance: 0,
-        error: null
-      });
-
-      await get().saveWalletToBackend({
-        address,
-        wallet_type: 'magic',
-        public_key: publicKey,
-        network: 'mainnet'
-      });
-
-      localStorage.setItem('connectedWalletType', 'magic');
-      localStorage.setItem('connectedWalletAddress', address);
-
-      return address;
+      const data = await response.json();
+      console.log("Blockstream API response:", data);
+      
+      // Calculate total balance (confirmed + unconfirmed)
+      const confirmedBalance = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+      const unconfirmedBalance = data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum;
+      const totalBalance = (confirmedBalance + unconfirmedBalance) / 100000000; // Convert satoshis to BTC
+      
+      return {
+        btcBalance: totalBalance,
+        confirmed: confirmedBalance / 100000000,
+        unconfirmed: unconfirmedBalance / 100000000
+      };
+      
     } catch (error) {
-      set({ 
-        error: error.message,
-        connecting: false 
-      });
-      throw error;
+      console.error("Error fetching real balance:", error);
+      // Fallback to zero instead of fake data
+      return { 
+        btcBalance: 0,
+        confirmed: 0,
+        unconfirmed: 0
+      };
     }
   },
 
-  // Generic wallet connection
-  connectWallet: async (walletType) => {
-    switch (walletType) {
-      case 'unisat':
-        return await get().connectUnisat();
-      case 'xverse':
-        return await get().connectXverse();
-      case 'leather':
-        return await get().connectLeather();
-      case 'hiro':
-        return await get().connectHiro();
-      case 'magic':
-        return await get().connectMagic();
-      default:
-        throw new Error('Unsupported wallet type');
-    }
-  },
-
-  // Save wallet to backend
+  // ------------------------------
+  // 🧾 Save wallet to backend
+  // ------------------------------
   saveWalletToBackend: async (walletData) => {
     try {
-      const response = await axiosInstance.post('/users/wallet/connect', walletData);
+      const sanitizedData = {
+        ...walletData,
+        address: String(walletData.address)
+      };
       
-      if (response.status >= 200 && response.status < 300) {
-        console.log('✅ Wallet saved to backend:', response.data);
-        return response.data;
-      } else {
-        throw new Error(`Failed to save wallet: ${response.statusText}`);
+      console.log("Sending wallet data to backend:", sanitizedData);
+      
+      const res = await axiosInstance.post("/users/wallet/connect", sanitizedData);
+      if (res.status >= 200 && res.status < 300) {
+        console.log("✅ Wallet saved to backend:", res.data);
+        return res.data;
       }
+      throw new Error(res.data?.error || res.statusText);
     } catch (error) {
-      console.error('❌ Error saving wallet:', error);
-      return null;
+      console.error("❌ Error saving wallet:", error);
+      throw error;
     }
   },
 
-  // Sign message (for verification) - FIXED
-  signMessage: async (message) => {
-    const { walletType, address } = get();
-    
-    if (!walletType || !address) {
-      throw new Error('Wallet not connected');
-    }
+  // ------------------------------
+  // 🔄 Update balance with REAL data
+  // ------------------------------
+  updateBalance: async () => {
+    const { address, walletType } = get();
+    if (!address || !walletType) return;
 
     try {
-      switch (walletType) {
-        case 'unisat':
-          return await window.unisat.signMessage(message, 'bip322-simple');
-        
-        case 'xverse':
-        case 'leather':
-        case 'hiro':
-        case 'magic': {
-          // Most wallets use the request method for signing
-          if (window.btc && typeof window.btc.request === 'function') {
-            return await window.btc.request('signMessage', { message });
-          }
-          throw new Error('Signing not available for this wallet');
-        }
-        
-        default:
-          throw new Error('Signing not supported for this wallet');
+      console.log("Updating balance with real data...");
+      
+      if (walletType === 'unisat' && window.unisat) {
+        const balance = await window.unisat.getBalance();
+        set({
+          balance: balance.total || balance.confirmed || 0,
+        });
+      } else if (walletType === 'leather') {
+        const balanceData = await get().fetchRealBalance(address);
+        set({
+          balance: balanceData.btcBalance,
+        });
+      } else if (walletType === 'okx') {
+        const balanceData = await get().fetchRealBalance(address);
+        set({
+          balance: balanceData.btcBalance,
+        });
       }
-    } catch (error) {
-      throw new Error(`Signing failed: ${error.message}`);
-    }
-  },
-
-  // Check if any wallet is available - FIXED
-  checkWalletAvailability: () => {
-    const wallets = {
-      unisat: false,
-      xverse: false,
-      leather: false,
-      hiro: false,
-      magic: false
-    };
-    
-    // Check Unisat
-    if (typeof window.unisat !== 'undefined' && typeof window.unisat.requestAccounts === 'function') {
-      wallets.unisat = true;
-    }
-    
-    // Check Xverse
-    if (
-      (typeof window.BitcoinProvider !== 'undefined' && typeof window.BitcoinProvider.request === 'function') ||
-      (typeof window.btc !== 'undefined' && typeof window.btc.request === 'function') ||
-      (typeof window.xverse !== 'undefined' && typeof window.xverse.request === 'function')
-    ) {
-      wallets.xverse = true;
-    }
-    
-    // Check Leather
-    if (typeof window.btc !== 'undefined' && typeof window.btc.request === 'function') {
-      wallets.leather = true;
-    }
-    
-    // Check Hiro
-    if (
-      (typeof window.btc !== 'undefined' && typeof window.btc.request === 'function') ||
-      (typeof window.StacksProvider !== 'undefined' && typeof window.StacksProvider.request === 'function')
-    ) {
-      wallets.hiro = true;
-    }
-    
-    // Check Magic Eden
-    if (
-      (typeof window.magiceden !== 'undefined' && window.magiceden.bitcoin && typeof window.magiceden.bitcoin.request === 'function') ||
-      (typeof window.btc !== 'undefined' && typeof window.btc.request === 'function')
-    ) {
-      wallets.magic = true;
-    }
-    
-    return wallets;
-  },
-
-  // Disconnect wallet
-  disconnectWallet: async () => {
-    const { address } = get();
-    
-    try {
-      if (address) {
-        await axiosInstance.post('/users/wallet/disconnect', { address });
-      }
-    } catch (error) {
-      console.error('Error notifying backend about disconnect:', error);
-    }
-
-    // Clear local state
-    set({
-      connected: false,
-      address: null,
-      walletType: null,
-      publicKey: null,
-      balance: 0,
-      error: null,
-      connecting: false
-    });
-
-    // Clear localStorage
-    localStorage.removeItem('connectedWalletType');
-    localStorage.removeItem('connectedWalletAddress');
-  },
-
-  // Get user's wallet info from backend
-  getWalletFromBackend: async (address) => {
-    try {
-      const response = await axiosInstance.get(`/users/wallet/${address}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching wallet from backend:', error);
-      return null;
-    }
-  },
-
-  // Update wallet balance from backend
-  updateWalletBalance: async () => {
-    const { address } = get();
-    if (!address) return;
-
-    try {
-      const response = await axiosInstance.get(`/users/wallet/${address}/balance`);
-      if (response.data.success) {
-        set({ balance: response.data.balance });
-      }
+      
+      console.log("Balance updated successfully");
     } catch (error) {
       console.error('Error updating balance:', error);
     }
   },
 
-  // Auto-connect if wallet was previously connected
-  autoConnect: async () => {
-    try {
-      const savedWalletType = localStorage.getItem('connectedWalletType');
-      const savedAddress = localStorage.getItem('connectedWalletAddress');
-      
-      if (savedWalletType && savedAddress) {
-        if (savedWalletType === 'unisat' && typeof window.unisat !== 'undefined') {
-          const accounts = await window.unisat.getAccounts();
-          if (accounts && accounts.length > 0 && accounts[0] === savedAddress) {
-            return await get().connectUnisat();
-          }
-        } else if (savedWalletType !== 'unisat') {
-          // For other wallets, try to reconnect
-          return await get().connectWallet(savedWalletType);
-        }
+  // ------------------------------
+  // 🔌 Disconnect wallet
+  // ------------------------------
+  disconnectWallet: async () => {
+    const { address } = get();
+    if (address) {
+      try {
+        await axiosInstance.post("/users/wallet/disconnect", { address });
+      } catch (err) {
+        console.error("Error disconnecting:", err);
       }
-    } catch (error) {
-      console.error('Auto-connect failed:', error);
-      localStorage.removeItem('connectedWalletType');
-      localStorage.removeItem('connectedWalletAddress');
     }
-    return null;
+    
+    set({
+      connected: false,
+      connecting: false,
+      walletType: null,
+      address: null,
+      publicKey: null,
+      balance: 0,
+      error: null
+    });
+    
+    localStorage.removeItem("connectedWalletType");
+    localStorage.removeItem("connectedWalletAddress");
+    localStorage.removeItem("walletNetwork");
   },
 
-  // Clear error
   clearError: () => set({ error: null }),
 
-  // Reset connection state
-  reset: () => set({
-    connected: false,
-    connecting: false,
-    address: null,
-    walletType: null,
-    publicKey: null,
-    balance: 0,
-    error: null
-  })
+  // ------------------------------
+  // Auto-reconnect
+  // ------------------------------
+  initializeFromStorage: () => {
+    if (typeof window === "undefined") return;
+    const walletType = localStorage.getItem("connectedWalletType");
+    const address = localStorage.getItem("connectedWalletAddress");
+    if (walletType && address) {
+      set({ 
+        connected: true, 
+        walletType, 
+        address,
+        network: localStorage.getItem("walletNetwork") || "mainnet"
+      });
+      
+      // Update with real data on reconnect
+      setTimeout(() => {
+        get().updateBalance();
+      }, 1000);
+    }
+  }
 }));
+
+// Initialize on store creation
+if (typeof window !== "undefined") {
+  useWalletStore.getState().initializeFromStorage();
+}
 
 export default useWalletStore;

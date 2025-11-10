@@ -23,7 +23,9 @@ const userSchema = new mongoose.Schema({
     }
   },password: {
   type: String,
-  required: true,
+  required: function() {
+    return !this.wallets || this.wallets.length === 0;
+  },
   minlength: 6
 },
   
@@ -36,7 +38,7 @@ const userSchema = new mongoose.Schema({
     },
     wallet_type: { 
       type: String, 
-      enum: ["unisat", "xverse", "ordinalswallet", "hiro", "magiceden", "other"],
+      enum: ["unisat", "xverse", "leather", "hiro", "magiceden", "other"],
       required: true 
     },
     public_key: { type: String },

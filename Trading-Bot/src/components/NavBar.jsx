@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Menu,
@@ -16,19 +16,26 @@ import {
   Coffee,
   Zap,
   Search,
+  LogOut,
+  Settings,
+  UserCircle,
+  ChevronDown,
 } from "lucide-react";
 import WalletConnect from "../components/WalletConnect";
 import { useThemeStore } from "../store/useThemeStore";
+import useWalletStore from "../store/useWalletStore";
 
 const NavBar = ({ onShowWalletModal }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [activeHover, setActiveHover] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-   const [showWalletModal, setShowWalletModal] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   const { theme, setTheme } = useThemeStore();
+  const { connected, address, walletType, balance, disconnectWallet } = useWalletStore();
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: Home },
@@ -46,6 +53,13 @@ const NavBar = ({ onShowWalletModal }) => {
     { id: "retro", name: "Retro", icon: Palette, color: "text-orange-400" },
     { id: "valentine", name: "Valentine", icon: User, color: "text-red-400" },
     { id: "aqua", name: "Aqua", icon: Activity, color: "text-teal-400" },
+  ];
+
+  const userMenuItems = [
+    { name: "Profile", href: "/profile", icon: UserCircle },
+    { name: "Wallet Details", href: "/wallet", icon: Wallet },
+    { name: "Settings", href: "/settings", icon: Settings },
+    { name: "Add Address", href: "/add-address", icon: User },
   ];
 
   const itemVariants = {
@@ -76,6 +90,21 @@ const NavBar = ({ onShowWalletModal }) => {
   const getCurrentThemeIcon = () => {
     const currentTheme = themes.find((t) => t.id === theme);
     return currentTheme ? currentTheme.icon : Palette;
+  };
+
+  const formatAddress = (addr) => {
+    if (!addr) return '';
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
+
+  const formatBalance = (bal) => {
+    if (!bal) return '0.00000000';
+    return (bal).toFixed(8);
+  };
+
+  const handleDisconnect = () => {
+    disconnectWallet();
+    setIsUserDropdownOpen(false);
   };
 
   const CurrentThemeIcon = getCurrentThemeIcon();
@@ -143,7 +172,7 @@ const NavBar = ({ onShowWalletModal }) => {
 
           {/* RIGHT SECTION */}
           <div className="flex items-center space-x-3 flex-shrink-0">
-            {/* Desktop Navigation   */}
+            {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-1">
               {navigation.map((item) => {
                 const isActive = location.pathname === item.href;
@@ -260,28 +289,121 @@ const NavBar = ({ onShowWalletModal }) => {
               </AnimatePresence>
             </motion.div>
 
-            {/* Connect Wallet */}
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <button
-                onClick={onShowWalletModal} // Changed from setShowWalletModal(true)
-                className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-2 rounded-full font-medium shadow-[0_0_25px_#22d3ee]/60 transition-all duration-500 flex items-center gap-2"
+            {/* USER PROFILE SECTION (When Connected) */}
+            {connected ? (
+              <motion.div 
+                className="relative"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3 }}
               >
-                <Wallet className="h-4 w-4" />
-                <span>Connect Wallet</span>
-              </button>
-            </motion.div>
+                <button
+                  onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
+                  className="flex items-center space-x-3 px-4 py-2 rounded-full bg-cyan-500/20 border border-cyan-400/30 hover:bg-cyan-500/30 transition-all duration-300"
+                >
+                  <div className="flex items-center space-x-2">
+                    <UserCircle className="h-5 w-5 text-cyan-400" />
+                    <div className="text-left">
+                      <div className="text-sm font-medium text-white">
+                        {formatAddress(address)}
+                      </div>
+                      <div className="text-xs text-cyan-300">
+                        {formatBalance(balance)} BTC
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-cyan-400 transition-transform ${isUserDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
 
-            {/* Login Button */}
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Link to="/login">
-                <div className="bg-cyan-500/20 border border-cyan-400/30 hover:bg-cyan-500/30 text-white px-5 py-2 rounded-full font-medium transition-all duration-300 hover:shadow-[0_0_15px_#22d3ee]/50">
-                  <span className="flex items-center space-x-2">
-                    <User className="h-4 w-4" />
-                    <span>Login</span>
-                  </span>
-                </div>
-              </Link>
-            </motion.div>
+                {/* User Dropdown Menu */}
+                <AnimatePresence>
+                  {isUserDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.1 }}
+                      className="absolute right-0 mt-2 w-64 bg-gray-900/95 backdrop-blur-xl border border-cyan-400/20 rounded-xl shadow-2xl z-50 overflow-hidden"
+                    >
+                      <div className="p-2">
+                        {/* User Info Header */}
+                        <div className="px-3 py-3 border-b border-cyan-400/10">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-cyan-500/20 rounded-full flex items-center justify-center">
+                              <UserCircle className="h-6 w-6 text-cyan-400" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-white truncate">
+                                {formatAddress(address)}
+                              </p>
+                              <p className="text-xs text-cyan-300 capitalize">
+                                {walletType} Wallet
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {formatBalance(balance)} BTC
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Menu Items */}
+                        <div className="py-2">
+                          {userMenuItems.map((item) => {
+                            const MenuIcon = item.icon;
+                            return (
+                              <Link
+                                key={item.name}
+                                to={item.href}
+                                onClick={() => setIsUserDropdownOpen(false)}
+                                className="flex items-center space-x-3 px-3 py-2.5 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg transition-all duration-200"
+                              >
+                                <MenuIcon className="h-4 w-4" />
+                                <span>{item.name}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+
+                        {/* Disconnect Button */}
+                        <div className="pt-2 border-t border-cyan-400/10">
+                          <button
+                            onClick={handleDisconnect}
+                            className="flex items-center space-x-3 px-3 py-2.5 w-full text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all duration-200"
+                          >
+                            <LogOut className="h-4 w-4" />
+                            <span>Disconnect Wallet</span>
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            ) : (
+              /* CONNECT WALLET & LOGIN (When Not Connected) */
+              <>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <button
+                    onClick={onShowWalletModal}
+                    className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-2 rounded-full font-medium shadow-[0_0_25px_#22d3ee]/60 transition-all duration-500 flex items-center gap-2"
+                  >
+                    <Wallet className="h-4 w-4" />
+                    <span>Connect Wallet</span>
+                  </button>
+                </motion.div>
+
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link to="/login">
+                    <div className="bg-cyan-500/20 border border-cyan-400/30 hover:bg-cyan-500/30 text-white px-5 py-2 rounded-full font-medium transition-all duration-300 hover:shadow-[0_0_15px_#22d3ee]/50">
+                      <span className="flex items-center space-x-2">
+                        <User className="h-4 w-4" />
+                        <span>Login</span>
+                      </span>
+                    </div>
+                  </Link>
+                </motion.div>
+              </>
+            )}
 
             {/* Mobile Menu Toggle */}
             <button
@@ -337,6 +459,45 @@ const NavBar = ({ onShowWalletModal }) => {
                   );
                 })}
 
+                {/* User Section in Mobile (When Connected) */}
+                {connected && (
+                  <div className="border-t border-cyan-400/10 pt-4 mt-2">
+                    <div className="text-xs font-semibold text-cyan-400 px-4 pb-2">
+                      ACCOUNT
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-3 px-4 py-3 bg-cyan-400/10 rounded-xl border border-cyan-400/20">
+                        <UserCircle className="h-5 w-5 text-cyan-400" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-white">{formatAddress(address)}</p>
+                          <p className="text-xs text-cyan-300">{formatBalance(balance)} BTC</p>
+                        </div>
+                      </div>
+                      {userMenuItems.map((item) => {
+                        const MenuIcon = item.icon;
+                        return (
+                          <Link
+                            key={item.name}
+                            to={item.href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className="flex items-center space-x-3 px-4 py-3 text-white/70 hover:text-cyan-300 hover:bg-cyan-400/5 rounded-xl transition-all duration-200"
+                          >
+                            <MenuIcon className="h-5 w-5" />
+                            <span>{item.name}</span>
+                          </Link>
+                        );
+                      })}
+                      <button
+                        onClick={handleDisconnect}
+                        className="flex items-center space-x-3 px-4 py-3 w-full text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all duration-200"
+                      >
+                        <LogOut className="h-5 w-5" />
+                        <span>Disconnect Wallet</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Theme Selector in Mobile */}
                 <div className="border-t border-cyan-400/10 pt-4 mt-2">
                   <div className="text-xs font-semibold text-cyan-400 px-4 pb-2">
@@ -368,31 +529,46 @@ const NavBar = ({ onShowWalletModal }) => {
                   </div>
                 </div>
 
-                {/* Login button in Mobile */}
-                <div className="pt-3 border-t border-cyan-400/10">
-                  <Link
-                    to="/login"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className="flex items-center justify-center space-x-2 w-full px-4 py-3 bg-cyan-500/20 border border-cyan-400/30 rounded-xl text-white font-medium hover:bg-cyan-500/30 transition-all duration-300"
-                  >
-                    <User className="h-4 w-4" />
-                    <span>Login</span>
-                  </Link>
-                </div>
+                {/* Connect Wallet & Login in Mobile (When Not Connected) */}
+                {!connected && (
+                  <div className="pt-3 border-t border-cyan-400/10 space-y-2">
+                    <button
+                      onClick={() => {
+                        onShowWalletModal();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="flex items-center justify-center space-x-2 w-full px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl text-white font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-300"
+                    >
+                      <Wallet className="h-4 w-4" />
+                      <span>Connect Wallet</span>
+                    </button>
+                    <Link
+                      to="/login"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="flex items-center justify-center space-x-2 w-full px-4 py-3 bg-cyan-500/20 border border-cyan-400/30 rounded-xl text-white font-medium hover:bg-cyan-500/30 transition-all duration-300"
+                    >
+                      <User className="h-4 w-4" />
+                      <span>Login</span>
+                    </Link>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Backdrop for dropdown */}
+      {/* Backdrop for dropdowns */}
       <AnimatePresence>
-        {isThemeDropdownOpen && (
+        {(isThemeDropdownOpen || isUserDropdownOpen) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setIsThemeDropdownOpen(false)}
+            onClick={() => {
+              setIsThemeDropdownOpen(false);
+              setIsUserDropdownOpen(false);
+            }}
             className="fixed inset-0 z-40"
           />
         )}
