@@ -525,7 +525,7 @@ const useWalletStore = create((set, get) => ({
       
       console.log("Sending wallet data to backend:", sanitizedData);
       
-      const res = await axiosInstance.post("/users/wallet/connect", sanitizedData);
+      const res = await axiosInstance.post("/user/wallet/connect", sanitizedData);
       if (res.status >= 200 && res.status < 300) {
         console.log("✅ Wallet saved to backend:", res.data);
         return res.data;
@@ -577,7 +577,7 @@ const useWalletStore = create((set, get) => ({
     const { address } = get();
     if (address) {
       try {
-        await axiosInstance.post("/users/wallet/disconnect", { address });
+        await axiosInstance.post("/user/wallet/disconnect", { address });
       } catch (err) {
         console.error("Error disconnecting:", err);
       }

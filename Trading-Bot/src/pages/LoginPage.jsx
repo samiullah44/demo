@@ -1,356 +1,312 @@
-import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Menu,
-  X,
-  Cpu,
-  BarChart3,
-  Store,
-  Home,
-  Settings,
-  Wallet,
-  User,
-  Activity,
-  Palette,
-  Sun,
-  Moon,
-  Coffee,
-  Zap
-} from "lucide-react";
-import { useThemeStore } from "../store/useThemeStore"
+import { Mail, Lock, Eye, EyeOff, CheckCircle, Clock } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuthStore } from "../store/useAuthStore";
+import useWalletStore from "../store/useWalletStore";
+import WalletConnect from "../components/WalletConnect";
 
-const NavBar = () => {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
-  const [activeHover, setActiveHover] = useState(null);
+const LoginPage = () => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [step, setStep] = useState("login"); // login → verify
+  const [otpTimer, setOtpTimer] = useState(0);
+  const [error, setError] = useState("");
+
+  const navigate = useNavigate();
   const location = useLocation();
-  
-  // Get theme from store
-  const { theme, setTheme } = useThemeStore();
 
-  const navigation = [
-    { name: "Dashboard", href: "/", icon: Home },
-    { name: "Strategies", href: "/strategies", icon: Cpu },
-    { name: "Analytics", href: "/analytics", icon: BarChart3 },
-    { name: "Markets", href: "/marketplace", icon: Store },
-    { name: "Settings", href: "/settings", icon: Settings },
-  ];
+  const {
+    authUser,
+    isLogingIng,
+    isSigningUp,
+    auth,
+    verifyOtp,
+    setUserFromWallet,
+  } = useAuthStore();
 
-  const themes = [
-    { id: "light", name: "Light", icon: Sun, color: "text-yellow-500" },
-    { id: "dark", name: "Dark", icon: Moon, color: "text-blue-400" },
-    { id: "cupcake", name: "Cupcake", icon: Coffee, color: "text-pink-400" },
-    { id: "cyberpunk", name: "Cyberpunk", icon: Zap, color: "text-cyan-400" },
-    { id: "synthwave", name: "Synthwave", icon: Activity, color: "text-purple-400" },
-    { id: "retro", name: "Retro", icon: Palette, color: "text-orange-400" },
-    { id: "valentine", name: "Valentine", icon: User, color: "text-red-400" },
-    { id: "aqua", name: "Aqua", icon: Activity, color: "text-teal-400" },
-  ];
+  const { connected, address, walletType } = useWalletStore();
+  const from = location.state?.from?.pathname || "/";
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: -20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { type: "spring", stiffness: 200, damping: 15 },
-    },
+  // --- Redirect Logic ---
+  useEffect(() => {
+    if (authUser) {
+      console.log("User authenticated, redirecting to:", from);
+      navigate(from, { replace: true });
+    }
+  }, [authUser, navigate, from]);
+
+  // Handle wallet connection when on login page
+  useEffect(() => {
+    if (connected && address && walletType && !authUser) {
+      console.log("Wallet connected, setting user from wallet");
+      setUserFromWallet({
+        address,
+        walletType,
+      });
+    }
+  }, [connected, address, walletType, authUser, setUserFromWallet]);
+
+  // --- OTP Timer ---
+  useEffect(() => {
+    let timer;
+    if (otpTimer > 0) {
+      timer = setInterval(() => setOtpTimer((t) => t - 1), 1000);
+    }
+    return () => clearInterval(timer);
+  }, [otpTimer]);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
   };
 
-  const logoVariants = {
-    initial: { scale: 0, rotate: -180 },
-    animate: {
-      scale: 1,
-      rotate: 0,
-      transition: { type: "spring", stiffness: 200, damping: 15, delay: 0.2 },
-    },
-    hover: { scale: 1.1, rotate: 5, transition: { duration: 0.3 } },
+  // --- Handlers ---
+  const handleEmailLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const result = await auth({ email, password });
+
+      if (result.otp_sent) {
+        // Needs verification
+        setStep("verify");
+        setOtpTimer(180);
+      } else {
+        // Logged in successfully - state is already set in the auth function
+        console.log("Email login successful, redirecting to:", from);
+        navigate(from, { replace: true });
+      }
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  const handleThemeChange = (selectedTheme) => {
-    setTheme(selectedTheme);
-    setIsThemeDropdownOpen(false);
-    // Optional: Apply theme to document for immediate visual feedback
-    document.documentElement.setAttribute('data-theme', selectedTheme);
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      await verifyOtp({ email, password, code: otp });
+      console.log("OTP verification successful, redirecting to:", from);
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  const getCurrentThemeIcon = () => {
-    const currentTheme = themes.find(t => t.id === theme);
-    return currentTheme ? currentTheme.icon : Palette;
+  const handleResendOtp = async () => {
+    try {
+      await auth({ email, password }); // re-trigger send
+      setOtpTimer(180);
+    } catch (err) {
+      setError("Failed to resend OTP. Try again.");
+    }
   };
 
-  const CurrentThemeIcon = getCurrentThemeIcon();
+  // --- Motion Variants ---
+  const fadeIn = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 },
+  };
 
   return (
-    <motion.nav
-      initial={{ y: -80, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 100, damping: 20 }}
-      className="fixed top-0 left-0 w-full z-50 border-b border-indigo-500/20 bg-gradient-to-br from-gray-900 to-black"
-      style={{
-        boxShadow: "0 0 25px rgba(0, 255, 255, 0.1)",
-        backdropFilter: "blur(8px)",
-      }}
-    >
-      <div className="lg:max-w-8xl mx-auto px-8 w-full">
-        <div className="flex justify-between items-center h-20 relative w-full">
-          <motion.div
-            variants={itemVariants}
-            className="shrink-0 flex items-center space-x-3"
-          >
-            <motion.div
-              variants={logoVariants}
-              initial="initial"
-              animate="animate"
-              whileHover="hover"
-              className="relative"
-            >
-              <div className="relative">
-                <Activity className="h-8 w-8 text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  className="absolute inset-0 border border-cyan-400/20 rounded-full"
-                />
-              </div>
-              <motion.div
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="absolute -inset-1 bg-cyan-400/20 blur-sm rounded-full"
-              />
-            </motion.div>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-black to-gray-900 px-4 pt-20">
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* -------------------- LEFT SIDE (Email Login) -------------------- */}
+        <motion.div
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          className="bg-gray-800/60 backdrop-blur-md border border-cyan-400/20 rounded-2xl p-8 shadow-lg"
+        >
+          <h1 className="text-3xl font-bold text-white mb-2">
+            {step === "verify" ? "Verify Your Email" : "Welcome Back"}
+          </h1>
+          <p className="text-cyan-300 mb-8">
+            {step === "verify"
+              ? "Enter the verification code sent to your email"
+              : "Sign in to continue"}
+          </p>
 
-            <motion.div
-              initial={{ opacity: 0.5, y: 20, scale: 1.3 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="flex flex-col"
-            >
-              <span className="text-2xl font-semibold text-white tracking-wider leading-none hover:text-white">
-                TradePulse
-              </span>
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: "70px" }}
-                transition={{ delay: 0.5, duration: 0.8 }}
-                className="h-px bg-gradient-to-r from-cyan-400 to-transparent mt-1"
-              />
-            </motion.div>
-          </motion.div>
-
-          {/* RIGHT SECTION */}
-          <div className="flex items-center space-x-3 flex-shrink-0">
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center space-x-1">
-              {navigation.map((item) => {
-                const isActive = location.pathname === item.href;
-                return (
-                  <motion.div
-                    key={item.name}
-                    variants={itemVariants}
-                    onHoverStart={() => setActiveHover(item.name)}
-                    onHoverEnd={() => setActiveHover(null)}
-                    className="relative"
-                  >
-                    <Link
-                      to={item.href}
-                      className={`relative flex items-center space-x-2 px-5 py-3 rounded-full text-sm font-medium transition-all duration-500 ${
-                        isActive
-                          ? "text-white"
-                          : "text-white hover:text-cyan-300 hover:bg-cyan-400/10"
-                      }`}
-                    >
-                      {isActive && (
-                        <motion.div
-                          layoutId="activeHighlight"
-                          className="absolute inset-0 bg-cyan-400/10 border border-cyan-400/30 rounded-full shadow-[0_0_20px_#22d3ee]"
-                          transition={{
-                            type: "spring",
-                            stiffness: 250,
-                            damping: 20,
-                          }}
-                        />
-                      )}
-                      <item.icon className="h-4 w-4 relative z-10" />
-                      <span className="relative z-10">{item.name}</span>
-                    </Link>
-                  </motion.div>
-                );
-              })}
-            </div>
-
-            {/* Theme Selector */}
-            <motion.div 
-              className="relative"
-              whileHover={{ scale: 1 }} 
-              whileTap={{ scale: 0.95 }}
-            >
-              <button
-                onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
-                className="flex items-center space-x-2 px-4 py-2 rounded-full text-white hover:bg-cyan-400/10 hover:text-cyan-300 transition-all duration-300"
+          <AnimatePresence mode="wait">
+            {step === "login" ? (
+              <motion.form
+                key="login"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                onSubmit={handleEmailLogin}
+                className="space-y-6"
               >
-                <CurrentThemeIcon className="h-5 w-5" />
-                <span className="hidden sm:block">Theme</span>
-              </button>
-
-              {/* Theme Dropdown */}
-              <AnimatePresence>
-                {isThemeDropdownOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, }}
-                    animate={{ opacity: 1, y: 0,}}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    transition={{ duration: 0.1 }}
-                    className="absolute right-0 mt-2 w-48 bg-gray-900/95 backdrop-blur-xl border border-cyan-400/20 rounded-xl shadow-2xl z-50 overflow-hidden"
-                  >
-                    <div className="p-2">
-                      <div className="text-xs font-semibold text-cyan-400 px-3 py-2 border-b border-cyan-400/10">
-                        SELECT THEME
-                      </div>
-                      <div className="max-h-60 overflow-y-auto">
-                        {themes.map((themeOption) => {
-                          const ThemeIcon = themeOption.icon;
-                          const isSelected = theme === themeOption.id;
-                          
-                          return (
-                            <button
-                              key={themeOption.id}
-                              onClick={() => handleThemeChange(themeOption.id)}
-                              className={`w-full flex items-center space-x-3 px-3 py-3.5 rounded-lg text-sm transition-all duration-200 ${
-                                isSelected
-                                  ? "bg-cyan-400/20 text-cyan-300 border border-cyan-400/30"
-                                  : "text-white/70 hover:text-white hover:bg-white/5"
-                              }`}
-                            >
-                              <ThemeIcon className={`h-4 w-4 ${themeOption.color}`} />
-                              <span>{themeOption.name}</span>
-                              {isSelected && (
-                                <motion.div
-                                  initial={{ scale: 0 }}
-                                  animate={{ scale: 1 }}
-                                  className="ml-auto w-2 h-2 bg-cyan-400 rounded-full"
-                                />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Link to="/connect">
-                <div className="group relative bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-2 rounded-full font-medium hover:shadow-[0_0_25px_#22d3ee]/60 transition-all duration-500 overflow-hidden">
-                  <motion.div
-                    animate={{ x: [-100, 300] }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      repeatDelay: 3,
-                    }}
-                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
-                  />
-                  <span className="flex items-center space-x-2 relative z-10">
-                    <Wallet className="h-4 w-4" />
-                    <span>Connect Wallet</span>
-                  </span>
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-5 w-5 text-cyan-400" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                      placeholder="Enter your email"
+                      required
+                    />
+                  </div>
                 </div>
-              </Link>
-            </motion.div>
 
-            {/* Mobile Menu */}
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden text-white/70 hover:text-white transition p-2 rounded-xl bg-white/5 hover:bg-white/10"
-            >
-              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
-          </div>
-        </div>
-
-        {/* Mobile Dropdown */}
-        <AnimatePresence>
-          {isMobileMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3 }}
-              className="md:hidden bg-cyan-950/30 backdrop-blur-xl border border-cyan-400/10 rounded-2xl mt-2"
-            >
-              <div className="px-4 py-4 space-y-2">
-                {navigation.map((item) => {
-                  const isActive = location.pathname === item.href;
-                  return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={`flex items-center space-x-3 px-4 py-3 rounded-xl ${
-                        isActive
-                          ? "bg-cyan-400/10 text-white border border-cyan-400/30"
-                          : "text-white/70 hover:text-cyan-300 hover:bg-cyan-400/5"
-                      }`}
+                {/* Password */}
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-3 h-5 w-5 text-cyan-400" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full pl-10 pr-12 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                      placeholder="Enter your password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-3 text-cyan-400"
                     >
-                      <item.icon className="h-5 w-5" />
-                      <span>{item.name}</span>
-                    </Link>
-                  );
-                })}
-                
-                {/* Theme Selector in Mobile Menu */}
-                <div className="border-t border-cyan-400/10 pt-4 mt-2">
-                  <div className="text-xs font-semibold text-cyan-400 px-4 pb-2">
-                    THEMES
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {themes.map((themeOption) => {
-                      const ThemeIcon = themeOption.icon;
-                      const isSelected = theme === themeOption.id;
-                      
-                      return (
-                        <button
-                          key={themeOption.id}
-                          onClick={() => {
-                            handleThemeChange(themeOption.id);
-                            setIsMobileMenuOpen(false);
-                          }}
-                          className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
-                            isSelected
-                              ? "bg-cyan-400/20 text-cyan-300 border border-cyan-400/30"
-                              : "text-white/70 hover:text-white hover:bg-white/5"
-                          }`}
-                        >
-                          <ThemeIcon className={`h-4 w-4 ${themeOption.color}`} />
-                          <span>{themeOption.name}</span>
-                        </button>
-                      );
-                    })}
+                      {showPassword ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
+                    </button>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
 
-      {/* Backdrop for dropdown */}
-      <AnimatePresence>
-        {isThemeDropdownOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsThemeDropdownOpen(false)}
-            className="fixed inset-0 z-40"
-          />
-        )}
-      </AnimatePresence>
-    </motion.nav>
+                {error && (
+                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLogingIng}
+                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-md"
+                >
+                  {isLogingIng ? "Signing In..." : "Continue"}
+                </button>
+              </motion.form>
+            ) : (
+              <motion.form
+                key="verify"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                onSubmit={handleVerifyOtp}
+                className="space-y-6"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                    Verification Code
+                  </label>
+                  <input
+                    type="text"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white text-center text-2xl tracking-widest placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                    placeholder="000000"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+
+                {/* Timer */}
+                <div className="text-center text-sm text-yellow-400">
+                  {otpTimer > 0 ? (
+                    <p className="flex justify-center items-center gap-1">
+                      <Clock className="h-4 w-4" /> Code expires in{" "}
+                      {formatTime(otpTimer)}
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      className="text-red-400 hover:text-red-300 font-medium"
+                    >
+                      Resend Code
+                    </button>
+                  )}
+                </div>
+
+                {error && (
+                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isSigningUp || otpTimer === 0}
+                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-md"
+                >
+                  {isSigningUp ? "Verifying..." : "Verify & Continue"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStep("login")}
+                  className="w-full text-cyan-400 hover:text-cyan-300 mt-2 text-sm"
+                >
+                  ← Back to Login
+                </button>
+              </motion.form>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* -------------------- RIGHT SIDE (Wallet Connect) -------------------- */}
+        <motion.div
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          transition={{ delay: 0.2 }}
+          className="bg-gray-800/60 backdrop-blur-md border border-purple-400/20 rounded-2xl p-8 shadow-lg flex flex-col justify-between"
+        >
+          <div>
+            <h2 className="text-3xl font-bold text-white mb-2 text-center">
+              Connect Wallet
+            </h2>
+            <p className="text-purple-300 text-center mb-8">
+              Secure login using your crypto wallet
+            </p>
+
+            <div className="max-w-sm mx-auto w-full">
+              <WalletConnect showAsLogin={true} />
+            </div>
+          </div>
+
+          <div className="text-center text-gray-400 text-sm border-t border-purple-400/20 pt-6 mt-8">
+            By connecting your wallet, you agree to our{" "}
+            <a href="#" className="text-cyan-400 hover:text-cyan-300">
+              Terms of Service
+            </a>{" "}
+            and{" "}
+            <a href="#" className="text-cyan-400 hover:text-cyan-300">
+              Privacy Policy
+            </a>
+          </div>
+        </motion.div>
+      </div>
+    </div>
   );
 };
 
-export default NavBar;
+export default LoginPage;

@@ -4,6 +4,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import cookieParser from "cookie-parser";
+
+
 
 import userRoutes from './routes/users.js';
 import ordinalRoutes from './routes/ordinals.js';
@@ -14,6 +17,7 @@ dotenv.config();
 
 const app = express();
 
+app.use(cookieParser());
 app.use(helmet());
 app.use(cors({
   origin: [
@@ -41,7 +45,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 .catch(err => console.error('MongoDB connection error:', err));
 
 // Routes
-app.use('/api/users', userRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api/ordinals', ordinalRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/triggers', marketTriggerRoutes);

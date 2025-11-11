@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Wallet, Download, X, AlertCircle, Zap, Shield, ExternalLink, Sparkles } from "lucide-react";
+import { Wallet, Download, X, AlertCircle, Zap, Shield, ExternalLink, Sparkles, Gem } from "lucide-react";
 import useWalletStore from "../store/useWalletStore";
 
 const WalletConnect = ({ onClose }) => {
@@ -19,7 +19,7 @@ const WalletConnect = ({ onClose }) => {
   const handleConnect = async (walletId) => {
     try { 
       await connectWallet(walletId); 
-      handleClose(); // Close modal on successful connection
+      handleClose();
     } catch (err) { 
       console.error(err); 
     }
@@ -52,15 +52,23 @@ const WalletConnect = ({ onClose }) => {
       icon: Shield, 
       description: "Bitcoin & Stacks Wallet" 
     },
-    //it is not downloading fine 
     { 
       id: "okx", 
       name: "OKX Wallet", 
       available: availableWallets.okx, 
-      installUrl: "https://www.okx.com/download", 
+      installUrl: "https://web3.okx.com/download", 
       gradient: "from-purple-500 to-pink-600", 
       icon: Sparkles, 
       description: "Multi-Chain Web3 Wallet" 
+    },
+    { 
+      id: "magicEden", 
+      name: "Magic Eden", 
+      available: availableWallets.magicEden, 
+      installUrl: "https://wallet.magiceden.io/", 
+      gradient: "from-green-500 to-emerald-600", 
+      icon: Gem, 
+      description: "NFT Marketplace & Wallet" 
     },
   ];
 
