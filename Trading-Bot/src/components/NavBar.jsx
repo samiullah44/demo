@@ -20,19 +20,23 @@ import {
   Settings,
   UserCircle,
   ChevronDown,
+  Loader,
   Mail,
 } from "lucide-react";
 import WalletConnect from "../components/WalletConnect";
 import { useThemeStore } from "../store/useThemeStore";
 import useWalletStore from "../store/useWalletStore";
 import { useAuthStore } from "../store/useAuthStore";
+import { getInscriptionDataById } from "../lib/ordinalsService";
 
 const NavBar = ({ onShowWalletModal }) => {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [activeHover, setActiveHover] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -155,6 +159,59 @@ const NavBar = ({ onShowWalletModal }) => {
     return null;
   };
 
+  const handleSearch = async (e) => {
+    if (e) {
+      e.preventDefault();
+    }
+    
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    setSearchError("");
+    
+    try {
+      const cleanQuery = searchQuery.trim();
+      
+      // Validate input format
+      if (!isValidInscriptionId(cleanQuery)) {
+        setSearchError("Please enter a valid inscription ID or number");
+        setIsSearching(false);
+        return;
+      }
+
+      // Fetch inscription data using JSON API
+      const inscriptionData = await getInscriptionDataById(cleanQuery);
+      
+      // Navigate to inscription detail page with the rich data
+      navigate('/inscription', { 
+        state: { 
+          inscriptionData,
+          searchQuery: cleanQuery
+        }
+      });
+      
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchError(error.message || 'Failed to fetch inscription data');
+      
+      // Auto-clear error after 5 seconds
+      setTimeout(() => setSearchError(""), 5000);
+    } finally {
+      setIsSearching(false);
+      setSearchQuery("");
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch(e);
+    }
+  };
+  const isValidInscriptionId = (id) => {
+    // Accepts: numbers (inscription numbers) or full inscription IDs with 'i0' suffix
+    return /^\d+$/.test(id) || /^[a-f0-9]{64}i0$/.test(id);
+  };
+
   const userInfo = getDisplayInfo();
   const CurrentThemeIcon = getCurrentThemeIcon();
 
@@ -261,17 +318,39 @@ const NavBar = ({ onShowWalletModal }) => {
             </div>
 
             {/* 🔍 Search Bar */}
-            <div className="hidden md:flex items-center ml-4">
+           <div className="hidden md:flex items-center ml-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-cyan-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search ordinals by collection name or id"
-                  className="pl-9 pr-3 py-2 w-80 bg-gray-800/70 text-white text-sm rounded-full border border-cyan-400/20 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 placeholder:text-gray-400"
+                  onKeyPress={handleKeyPress}
+                  placeholder="Search by inscription ID (e.g., 12345 or hash)"
+                  className="pl-9 pr-10 py-2 w-80 bg-gray-800/70 text-white text-sm rounded-full border border-cyan-400/20 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 placeholder:text-gray-400 transition-all duration-300"
+                  disabled={isSearching}
                 />
+                <button
+                  onClick={handleSearch}
+                  disabled={isSearching || !searchQuery.trim()}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-cyan-400 hover:text-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                >
+                  {isSearching ? (
+                    <Loader className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                </button>
               </div>
+              {searchError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute top-full left-0 mt-2 text-red-400 text-xs bg-red-900/50 px-3 py-1 rounded-lg"
+                >
+                  {searchError}
+                </motion.div>
+              )}
             </div>
 
             {/* Theme Selector */}
@@ -571,17 +650,35 @@ const NavBar = ({ onShowWalletModal }) => {
         </div>
 
         {/* 🔍 Mobile Search Bar (Always Visible Below Nav) */}
-        <div className="md:hidden px-2 mt-2">
+       <div className="md:hidden px-2 mt-2">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-cyan-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search ordinals by collection name or id"
-              className="pl-9 pr-3 py-2 w-full bg-gray-800/70 text-white text-sm rounded-full border border-cyan-400/20 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 placeholder:text-gray-400"
+              onKeyPress={handleKeyPress}
+              placeholder="Search by inscription ID"
+              className="pl-9 pr-10 py-2 w-full bg-gray-800/70 text-white text-sm rounded-full border border-cyan-400/20 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 placeholder:text-gray-400"
+              disabled={isSearching}
             />
+            <button
+              onClick={handleSearch}
+              disabled={isSearching || !searchQuery.trim()}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-cyan-400 hover:text-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSearching ? (
+                <Loader className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+            </button>
           </div>
+          {searchError && (
+            <div className="text-red-400 text-xs mt-1 text-center">
+              {searchError}
+            </div>
+          )}
         </div>
 
         {/* Mobile Dropdown */}

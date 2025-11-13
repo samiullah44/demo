@@ -12,7 +12,9 @@ import LoginPage from "./pages/LoginPage"
 import WalletConnect from "./components/WalletConnect"
 import { useThemeStore } from "./store/useThemeStore";
 import { useAuthStore } from "./store/useAuthStore";
+import Collecttions from "./pages/Collections"
 import {Toaster} from "react-hot-toast"
+import InscriptionDetail from './pages/InscriptionDetail';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -117,6 +119,14 @@ function AppContent() {
               <Settings />
             </ProtectedRoute>
           } />
+          <Route path="/collections" element={
+            <ProtectedRoute>
+              <Collecttions />
+            </ProtectedRoute>
+          } />
+          <Route path="/inscription" element={ <ProtectedRoute>
+              <InscriptionDetail />
+            </ProtectedRoute>} />
 
           {/* Fallback route */}
           <Route path="*" element={<Navigate to="/" replace />} />

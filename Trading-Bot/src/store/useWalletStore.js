@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import axiosInstance from "../lib/axios";
+import { getAddress, signMessage, BitcoinNetworkType, AddressPurpose } from "sats-connect";
 
 const VERIFY_MESSAGE = "Verify your wallet ownership to log in to Ordinal Marketplace";
 
@@ -17,37 +18,42 @@ const useWalletStore = create((set, get) => ({
   // 🔍 Check wallet availability
   // ------------------------------
   checkWalletAvailability: () => {
-    if (typeof window === "undefined") return { unisat: false, leather: false, okx: false };
+    if (typeof window === "undefined")
+      return { unisat: false, leather: false, okx: false, magicEden: false };
 
     const unisatAvailable = typeof window.unisat !== "undefined" && typeof window.unisat.requestAccounts === "function";
-    
+
     // Leather detection
     let leatherAvailable = false;
     if (window.LeatherProvider) {
       leatherAvailable = true;
     } else if (window.btc) {
-      leatherAvailable = typeof window.btc.request === 'function' || 
-                        typeof window.btc.getAddresses === 'function' ||
-                        typeof window.btc.connect === 'function';
+      leatherAvailable = typeof window.btc.request === 'function' ||
+        typeof window.btc.getAddresses === 'function' ||
+        typeof window.btc.connect === 'function';
     }
 
-    // OKX Wallet detection - check multiple possible APIs
+    // OKX detection
     let okxAvailable = false;
     if (window.okxwallet) {
-      // Main OKX wallet object
       okxAvailable = true;
     } else if (window.bitkeep && window.bitkeep.bitcoin) {
-      // BitKeep (acquired by OKX)
       okxAvailable = true;
     } else if (window.$onekey && window.$onekey.btc) {
-      // OneKey wallet (sometimes detected as OKX)
       okxAvailable = true;
     }
 
-    return { 
-      unisat: unisatAvailable, 
-      leather: leatherAvailable, 
-      okx: okxAvailable 
+    // Magic Eden detection
+    let magicEdenAvailable = false;
+    if (window.magicEden && window.magicEden.bitcoin && window.magicEden.bitcoin.isMagicEden) {
+      magicEdenAvailable = true;
+    }
+
+    return {
+      unisat: unisatAvailable,
+      leather: leatherAvailable,
+      okx: okxAvailable,
+      magicEden: magicEdenAvailable,
     };
   },
 
@@ -64,6 +70,8 @@ const useWalletStore = create((set, get) => ({
           return await get().connectLeather();
         case "okx":
           return await get().connectOKX();
+        case "magicEden":
+          return await get().connectMagicEden();
         default:
           throw new Error("Unsupported wallet type");
       }
@@ -72,6 +80,117 @@ const useWalletStore = create((set, get) => ({
       throw error;
     }
   },
+
+  // ------------------------------
+  // 💜 Magic Eden Wallet (Bitcoin + Sats Connect)
+  // ------------------------------
+connectMagicEden: async () => {
+  const provider = window.magicEden?.bitcoin;
+
+  if (!provider) {
+    throw new Error(
+      "Magic Eden Wallet not detected. Please install it from https://wallet.magiceden.io/"
+    );
+  }
+
+  try {
+    console.log("🪄 Connecting to Magic Eden Wallet via Sats Connect...");
+
+    // Use getAddress with proper getProvider and purposes
+    const addressResponse = await getAddress({
+      getProvider: () => provider,
+      payload: {
+        purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment], // Multiple purposes allowed
+        message: "Connect to Magic Eden Wallet",
+        network: {
+          type: BitcoinNetworkType.Mainnet,
+        },
+      },
+      onFinish: (response) => {
+        console.log("✅ Address request finished:", response.addresses);
+      },
+      onCancel: () => {
+        console.warn("⚠️ Address request canceled by user");
+      },
+    });
+
+    if (!addressResponse?.addresses || addressResponse.addresses.length === 0) {
+      throw new Error("Failed to retrieve address from Magic Eden Wallet");
+    }
+
+    // Extract the ordinals address
+    const ordinalsData = addressResponse.addresses.find(
+      (a) => a.purpose === AddressPurpose.Ordinals
+    );
+
+    const address = ordinalsData?.address;
+    const publicKey = ordinalsData?.publicKey || null;
+
+    if (!address) {
+      throw new Error("No Ordinals address returned by Magic Eden Wallet");
+    }
+
+    console.log("✅ Magic Eden address:", address);
+    console.log("🗝️ Public key:", publicKey);
+
+    // Sign a verification message
+    let signature = null;
+    try {
+      const signRes = await signMessage({
+        getProvider: () => provider,
+        payload: {
+          network: { type: BitcoinNetworkType.Mainnet },
+          address,
+          message: VERIFY_MESSAGE,
+        },
+      });
+
+      signature = signRes?.signature;
+      console.log("✍️ Magic Eden signature:", signature);
+    } catch (signError) {
+      console.warn("⚠️ Magic Eden signMessage failed:", signError);
+    }
+
+    // Fetch wallet balance (if you have fetchRealBalance function)
+    const balanceData = await get().fetchRealBalance(address);
+
+    // Save wallet info to backend if signature exists
+    if (signature) {
+      await get().saveWalletToBackend({
+        address,
+        wallet_type: "magicEden",
+        public_key: publicKey,
+        network: "mainnet",
+        signature,
+        message: VERIFY_MESSAGE,
+        balance: balanceData.btcBalance,
+      });
+    }
+
+    // Update Zustand store
+    set({
+      connected: true,
+      connecting: false,
+      walletType: "magicEden",
+      address,
+      publicKey,
+      network: "mainnet",
+      balance: balanceData.btcBalance,
+    });
+
+    // Save locally
+    localStorage.setItem("connectedWalletType", "magicEden");
+    localStorage.setItem("connectedWalletAddress", address);
+    localStorage.setItem("walletNetwork", "mainnet");
+
+    console.log("🎉 Successfully connected to Magic Eden Wallet");
+    return { address, publicKey, balance: balanceData.btcBalance };
+  } catch (error) {
+    console.error("Magic Eden Wallet connection error:", error);
+    set({ connecting: false, error: error.message });
+    throw error;
+  }
+},
 
   // ------------------------------
   // 🟣 OKX Wallet - FIXED IMPLEMENTATION
