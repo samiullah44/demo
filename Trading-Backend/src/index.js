@@ -12,6 +12,7 @@ import userRoutes from './routes/users.js';
 import ordinalRoutes from './routes/ordinals.js';
 import transactionRoutes from './routes/transactions.js';
 import marketTriggerRoutes from './routes/marketTriggers.js';
+import collectionRoutes from './routes/collections.js';
 
 dotenv.config();
 
@@ -49,6 +50,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/ordinals', ordinalRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/triggers', marketTriggerRoutes);
+app.use('/api/collections', collectionRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

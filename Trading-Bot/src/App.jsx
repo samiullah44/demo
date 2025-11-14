@@ -12,10 +12,10 @@ import LoginPage from "./pages/LoginPage"
 import WalletConnect from "./components/WalletConnect"
 import { useThemeStore } from "./store/useThemeStore";
 import { useAuthStore } from "./store/useAuthStore";
-import Collecttions from "./pages/Collections"
+import Collections from "./pages/Collections"
 import {Toaster} from "react-hot-toast"
 import InscriptionDetail from './pages/InscriptionDetail';
-
+import CollectionDetail from './pages/CollectionDetail';
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { authUser, isCheckingAuth } = useAuthStore();
@@ -121,11 +121,14 @@ function AppContent() {
           } />
           <Route path="/collections" element={
             <ProtectedRoute>
-              <Collecttions />
+              <Collections />
             </ProtectedRoute>
           } />
-          <Route path="/inscription" element={ <ProtectedRoute>
+          <Route path="/inscription/:id" element={ <ProtectedRoute>
               <InscriptionDetail />
+            </ProtectedRoute>} />
+            <Route path="/collection/:slug" element={<ProtectedRoute>
+              <CollectionDetail />
             </ProtectedRoute>} />
 
           {/* Fallback route */}

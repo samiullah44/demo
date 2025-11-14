@@ -48,7 +48,7 @@ const NavBar = ({ onShowWalletModal }) => {
     { name: "Dashboard", href: "/", icon: Home },
     { name: "Analytics", href: "/analytics", icon: BarChart3 },
     { name: "Markets", href: "/marketplace", icon: Store },
-    { name: "Collections", href: "/collection", icon: Store },
+    { name: "Collections", href: "/collections", icon: Store },
   ];
 
   const themes = [
@@ -183,7 +183,7 @@ const NavBar = ({ onShowWalletModal }) => {
       const inscriptionData = await getInscriptionDataById(cleanQuery);
       
       // Navigate to inscription detail page with the rich data
-      navigate('/inscription', { 
+      navigate(`/inscription/${cleanQuery}`, { 
         state: { 
           inscriptionData,
           searchQuery: cleanQuery
