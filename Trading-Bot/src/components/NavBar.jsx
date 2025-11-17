@@ -24,6 +24,7 @@ import {
   Mail,
 } from "lucide-react";
 import WalletConnect from "../components/WalletConnect";
+import Leaderboard from "../components/Leaderboard";
 import { useThemeStore } from "../store/useThemeStore";
 import useWalletStore from "../store/useWalletStore";
 import { useAuthStore } from "../store/useAuthStore";
@@ -64,7 +65,7 @@ const NavBar = ({ onShowWalletModal }) => {
 
   const userMenuItems = [
     { name: "Profile", href: "/profile", icon: UserCircle },
-    { name: "Wallet Details", href: "/wallet", icon: Wallet },
+    { name: "Personal Details", href: "/portfolio", icon: Wallet },
     { name: "Settings", href: "/settings", icon: Settings },
     { name: "Add Address", href: "/add-address", icon: User },
   ];

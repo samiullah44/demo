@@ -16,6 +16,7 @@ import Collections from "./pages/Collections"
 import {Toaster} from "react-hot-toast"
 import InscriptionDetail from './pages/InscriptionDetail';
 import CollectionDetail from './pages/CollectionDetail';
+import Leaderboard from "./components/Leaderboard";
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { authUser, isCheckingAuth } = useAuthStore();
@@ -96,7 +97,7 @@ function AppContent() {
           } />
           <Route path="/analytics" element={
             <ProtectedRoute>
-              <TradingDashboard />
+              <Leaderboard />
             </ProtectedRoute>
           } />
           <Route path="/marketplace" element={

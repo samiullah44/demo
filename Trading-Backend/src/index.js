@@ -13,6 +13,8 @@ import ordinalRoutes from './routes/ordinals.js';
 import transactionRoutes from './routes/transactions.js';
 import marketTriggerRoutes from './routes/marketTriggers.js';
 import collectionRoutes from './routes/collections.js';
+import listingRoutes from './routes/listings.js';
+import psbtRoutes from './routes/psbtRoutes.js';
 
 dotenv.config();
 
@@ -51,6 +53,8 @@ app.use('/api/ordinals', ordinalRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/triggers', marketTriggerRoutes);
 app.use('/api/collections', collectionRoutes);
+app.use('/api/listings', listingRoutes);
+app.use('/api/psbt', psbtRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

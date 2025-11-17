@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from "react";
 import {
   Filter, Search, Bitcoin, Zap, Crown, Sparkles, Shield, Target, 
-  CheckCircle, ExternalLink, Calendar, User, Hash, Clock, SortAsc
+  CheckCircle, ExternalLink, Calendar, User, Hash, Clock, SortAsc,
+  Plus, List
 } from "lucide-react";
 import useOrdinalStore from "../store/useOrdinalStore";
+import useWalletStore from "../store/useWalletStore";
+import ListOrdinalModal from "../components/ListOrdinalModal";
+import BuyOrdinalModal from "../components/BuyOrdinalModal";
 
 const MarketPlace = () => {
   const [priceLimit, setPriceLimit] = useState(0.1);
@@ -19,11 +23,51 @@ const MarketPlace = () => {
   const [listedOnly, setListedOnly] = useState(false);
   const [sortOption, setSortOption] = useState("latest");
 
+  // PSBT Modal States
+  const [showListModal, setShowListModal] = useState(false);
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [selectedOrdinalForListing, setSelectedOrdinalForListing] = useState(null);
+  const [selectedListingForPurchase, setSelectedListingForPurchase] = useState(null);
+
   const { ordinals, getAllOrdinals } = useOrdinalStore();
+  const { connected, address, connectWallet } = useWalletStore();
 
   useEffect(() => {
     getAllOrdinals();
   }, [getAllOrdinals]);
+
+  // PSBT Handler Functions
+  const handleListClick = (ordinal) => {
+    if (!connected) {
+      alert('Please connect your wallet to list ordinals');
+      return;
+    }
+    setSelectedOrdinalForListing(ordinal);
+    setShowListModal(true);
+  };
+
+  const handleBuyClick = (ordinal) => {
+    if (!connected) {
+      alert('Please connect your wallet to purchase ordinals');
+      return;
+    }
+    setSelectedListingForPurchase(ordinal);
+    setShowBuyModal(true);
+  };
+
+  const handleListed = () => {
+    setShowListModal(false);
+    setSelectedOrdinalForListing(null);
+    // Refresh ordinals to show the new listing
+    getAllOrdinals();
+  };
+
+  const handlePurchased = (purchaseData) => {
+    setShowBuyModal(false);
+    setSelectedListingForPurchase(null);
+    // Refresh ordinals to show the purchase
+    getAllOrdinals();
+  };
 
   // 🧮 Filter Logic
   const filteredOrdinals = ordinals
@@ -63,11 +107,11 @@ const MarketPlace = () => {
         case "priceHigh":
           return (b.price_btc || 0) - (a.price_btc || 0);
         case "rarity":
-          const rarityOrder = ["mythic", "legendary", "epic", "rare", "uncommon", "common"];
+          { const rarityOrder = ["mythic", "legendary", "epic", "rare", "uncommon", "common"];
           return (
             rarityOrder.indexOf(a.Sat_Rarity?.toLowerCase()) -
             rarityOrder.indexOf(b.Sat_Rarity?.toLowerCase())
-          );
+          ); }
         default:
           return 0;
       }
@@ -137,6 +181,17 @@ const MarketPlace = () => {
             <p className="text-xl text-gray-300">
               Trade smarter with filters and auto-buy price limits
             </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-center gap-4 mb-6">
+            <button
+              onClick={() => handleListClick(null)}
+              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              List Your Ordinals
+            </button>
           </div>
 
           {/* 🆕 Filter Controls */}
@@ -275,9 +330,22 @@ const MarketPlace = () => {
                   {/* Action Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-6">
                     <div className="flex flex-col gap-2 w-full px-4">
-                      <button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform translate-y-4 group-hover:translate-y-0 text-sm">
-                        Buy Now
-                      </button>
+                      {ordinal.price_btc ? (
+                        <button 
+                          onClick={() => handleBuyClick(ordinal)}
+                          className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 transform translate-y-4 group-hover:translate-y-0 text-sm"
+                        >
+                          Buy Now
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handleListClick(ordinal)}
+                          className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform translate-y-4 group-hover:translate-y-0 text-sm flex items-center justify-center gap-1"
+                        >
+                          <List className="w-3 h-3" />
+                          List for Sale
+                        </button>
+                      )}
                       <button 
                         onClick={() => setSelectedOrdinalForLimit(ordinal)}
                         className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform translate-y-4 group-hover:translate-y-0 text-sm flex items-center justify-center gap-1"
@@ -350,6 +418,31 @@ const MarketPlace = () => {
           )}
         </div>
       </section>
+
+      {/* PSBT Modals - FIXED: Check showListModal instead of selectedOrdinalForListing */}
+      {showListModal && (
+        <ListOrdinalModal
+          ordinal={selectedOrdinalForListing}
+          isOpen={showListModal}
+          onClose={() => {
+            setShowListModal(false);
+            setSelectedOrdinalForListing(null);
+          }}
+          onListed={handleListed}
+        />
+      )}
+
+      {showBuyModal && (
+        <BuyOrdinalModal
+          listing={selectedListingForPurchase}
+          isOpen={showBuyModal}
+          onClose={() => {
+            setShowBuyModal(false);
+            setSelectedListingForPurchase(null);
+          }}
+          onPurchased={handlePurchased}
+        />
+      )}
 
       {/* Price Limit Modal */}
       {selectedOrdinalForLimit && (
@@ -517,9 +610,27 @@ const MarketPlace = () => {
                   </div>
 
                   <div className="flex gap-2 pt-4">
-                    <button className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300">
-                      Buy Now
-                    </button>
+                    {selectedOrdinalDetail.price_btc ? (
+                      <button 
+                        onClick={() => {
+                          setSelectedOrdinalDetail(null);
+                          handleBuyClick(selectedOrdinalDetail);
+                        }}
+                        className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300"
+                      >
+                        Buy Now
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => {
+                          setSelectedOrdinalDetail(null);
+                          handleListClick(selectedOrdinalDetail);
+                        }}
+                        className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300"
+                      >
+                        List for Sale
+                      </button>
+                    )}
                     <button 
                       onClick={() => {
                         setSelectedOrdinalDetail(null);

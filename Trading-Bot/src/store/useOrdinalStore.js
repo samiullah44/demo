@@ -11,7 +11,18 @@ getAllOrdinals: async () => {
   } catch (error) {
     console.error('Error fetching ordinals:', error);
   }
-}
+},
+ getUserOrdinals: async (address) => {
+    try {
+      const response = await axiosInstance.get(`/user/${address}/ordinals`);
+      set({ userOrdinals: response.data.ordinals });
+      return response.data.ordinals;
+    } catch (error) {
+      console.error('Failed to fetch user ordinals:', error);
+      set({ userOrdinals: [] });
+      return [];
+    }
+  },
 }));
 
 export default useOrdinalStore;
