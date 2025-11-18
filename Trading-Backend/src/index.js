@@ -26,6 +26,7 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'http://localhost:3000', 'http://127.0.0.1:3000', 'file://',"file:///C:/Users/Sajid%20Malik/Desktop/index.html",
     process.env.FRONTEND_URL 
   ], 
   credentials: true, 
