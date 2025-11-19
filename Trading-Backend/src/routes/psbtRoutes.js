@@ -7,7 +7,7 @@ import {
   validatePSBT,
   broadcastPSBT,
   signPSBTWithWallet,
-  verifySignedPSBT
+  verifySignedPSBT,generateSellerPSBTSimple,decodePSBT
 } from '../controllers/psbtController.js';
 import { validatePSBTRequest, validateOwnershipRequest } from '../middleware/validations.js';
 
@@ -19,12 +19,14 @@ router.get('/health', (req, res) => {
 
 // Generate PSBT for seller to list an ordinal
 router.post('/generate-seller', generateSellerPSBT);
+router.post('/generate-seller-simple', generateSellerPSBTSimple);
 
 // Sign PSBT with wallet (triggers wallet popup)
 router.post('/sign-psbt', signPSBTWithWallet);
 
 // Verify signed PSBT
 router.post('/verify-signed-psbt', verifySignedPSBT);
+router.post('/decode', decodePSBT);
 
 // Generate PSBT for buyer to purchase a listed ordinal
 router.post('/generate-buyer', generateBuyerPSBT);

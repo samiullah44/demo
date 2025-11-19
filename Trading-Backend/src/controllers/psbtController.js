@@ -4,7 +4,9 @@ import {
   verifyOwnership as verifyOwnershipService,
   validatePSBT as validatePSBTService,
   signPSBTWithWalletService,
-  verifySignedPSBTService 
+  verifySignedPSBTService,
+  generateSellerPSBTSimple as generateSellerPSBTSimpleService ,
+  decodePSBTData
 } from '../services/psbtService.js';
 import { AppError } from '../middleware/errorHandler.js';
 import {Listing} from '../models/Listing.js';
@@ -250,6 +252,74 @@ export const verifySignedPSBT = async (req, res, next) => {
         'PSBT is fully signed and ready for broadcast' : 
         'PSBT verification completed',
       data: verificationResult
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Generate Simple Seller PSBT
+export const generateSellerPSBTSimple = async (req, res, next) => {
+  try {
+    const {
+      inscription_id,
+      inscription_output,
+      price_sats,
+      seller_address,
+      payment_address,
+      network
+    } = req.body;
+
+    // Validate required fields
+    if (!inscription_id || !inscription_output || !price_sats || !seller_address) {
+      throw new AppError('Missing required fields', 400);
+    }
+
+    const unsignedPSBT = await generateSellerPSBTSimpleService(
+      inscription_id,
+      inscription_output,
+      price_sats,
+      seller_address,
+      payment_address || seller_address,
+      network
+    );
+
+    res.json({
+      success: true,
+      message: 'Simple Seller PSBT generated successfully',
+      data: {
+        unsigned_psbt: unsignedPSBT,
+        method: 'simple',
+        features: 'witnessUtxo only - optimized for modern wallets'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+// Decode PSBT/Transaction data
+export const decodePSBT = async (req, res, next) => {
+  try {
+    const {
+      encoded_data,
+      network = 'testnet'
+    } = req.body;
+
+    if (!encoded_data) {
+      throw new AppError('encoded_data is required', 400);
+    }
+
+    console.log('🔍 Decoding PSBT/Transaction data...');
+
+    const decodedData = await decodePSBTData(
+      encoded_data,
+      network
+    );
+
+    res.json({
+      success: true,
+      message: 'Data decoded successfully',
+      data: decodedData
     });
   } catch (error) {
     next(error);
