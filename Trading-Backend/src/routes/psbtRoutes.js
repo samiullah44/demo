@@ -1,43 +1,187 @@
-// src/routes/psbtRoutes.js
 import express from 'express';
 import {
   generateSellerPSBT,
+  generateSellerPSBTSimple,
+  createListingWithSignedPSBT,
   generateBuyerPSBT,
+  generateDummyUtxo,
   verifyOwnership,
   validatePSBT,
-  broadcastPSBT,
+  decodePSBT,
   signPSBTWithWallet,
-  verifySignedPSBT,generateSellerPSBTSimple,decodePSBT
+  verifySignedPSBT,
+  broadcastTransaction
 } from '../controllers/psbtController.js';
-import { validatePSBTRequest, validateOwnershipRequest } from '../middleware/validations.js';
 
 const router = express.Router();
 
+// ============================================================================
+// HEALTH CHECK
+// ============================================================================
 router.get('/health', (req, res) => {
-  res.json({ status: 'PSBT routes are healthy' });
+  res.json({ 
+    status: 'healthy',
+    message: 'PSBT service is running',
+    endpoints: {
+      seller: [
+        'POST /generate-seller - Generate unsigned seller PSBT',
+        'POST /create-listing - Create listing with signed PSBT'
+      ],
+      buyer: [
+        'POST /generate-buyer - Generate buyer PSBT for purchase',
+        'POST /generate-dummy-utxo - Create dummy UTXO for purchases'
+      ],
+      utilities: [
+        'POST /verify-ownership - Verify inscription ownership',
+        'POST /validate - Validate PSBT',
+        'POST /decode - Decode PSBT/Transaction',
+        'POST /verify-signed-psbt - Verify signed PSBT',
+        'POST /broadcast - Broadcast transaction'
+      ]
+    }
+  });
 });
 
-// Generate PSBT for seller to list an ordinal
+// ============================================================================
+// SELLER FLOW
+// ============================================================================
+
+/**
+ * STEP 1: Generate unsigned seller PSBT
+ * Body: {
+ *   inscription_id: string,
+ *   inscription_output: string (txid:vout),
+ *   price_sats: number,
+ *   seller_address: string,
+ *   payment_address?: string,
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
 router.post('/generate-seller', generateSellerPSBT);
+
+/**
+ * STEP 1 (Alternative): Generate simple seller PSBT
+ * Smaller size, witnessUtxo only
+ */
 router.post('/generate-seller-simple', generateSellerPSBTSimple);
 
-// Sign PSBT with wallet (triggers wallet popup)
-router.post('/sign-psbt', signPSBTWithWallet);
+/**
+ * STEP 2: Create listing with signed PSBT
+ * Body: {
+ *   inscription_id: string,
+ *   inscription_number?: string,
+ *   inscription_output: string,
+ *   price_sats: number,
+ *   price_btc?: number,
+ *   seller_address: string,
+ *   payment_address?: string,
+ *   signed_psbt: string (base64 or hex),
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/create-listing', (req, res, next) => {
+  // Add the isForListing option
+  req.isForListing = true;
+  createListingWithSignedPSBT(req, res, next);
+});
 
-// Verify signed PSBT
-router.post('/verify-signed-psbt', verifySignedPSBT);
-router.post('/decode', decodePSBT);
+// ============================================================================
+// BUYER FLOW
+// ============================================================================
 
-// Generate PSBT for buyer to purchase a listed ordinal
+/**
+ * STEP 1 (Optional): Generate dummy UTXO
+ * Required before first purchase
+ * Body: {
+ *   payer_address: string,
+ *   number_of_dummy_utxos?: number (default 1, max 10),
+ *   network?: 'testnet' | 'mainnet',
+ *   fee_level?: 'fastestFee' | 'halfHourFee' | 'hourFee' | 'economyFee'
+ * }
+ */
+router.post('/generate-dummy-utxo', generateDummyUtxo);
+
+/**
+ * STEP 2: Generate buyer PSBT for purchase
+ * Body: {
+ *   listing_id: string,
+ *   buyer_payment_address: string,
+ *   buyer_receive_address?: string (defaults to payment address),
+ *   fee_level?: 'fastestFee' | 'halfHourFee' | 'hourFee' | 'economyFee',
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
 router.post('/generate-buyer', generateBuyerPSBT);
 
-// Verify ownership of an inscription
-router.post('/verify-ownership', validateOwnershipRequest, verifyOwnership);
+// ============================================================================
+// VERIFICATION & VALIDATION
+// ============================================================================
 
-// Validate a PSBT
-router.post('/validate', validatePSBTRequest, validatePSBT);
+/**
+ * Verify inscription ownership
+ * Body: {
+ *   inscription_id: string,
+ *   address: string,
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/verify-ownership', verifyOwnership);
 
-// Broadcast a signed PSBT
-router.post('/broadcast', broadcastPSBT);
+/**
+ * Validate PSBT structure
+ * Body: {
+ *   psbt_base64: string,
+ *   inscription_output: string,
+ *   expected_amount?: number,
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/validate', validatePSBT);
+
+/**
+ * Verify signed PSBT
+ * Body: {
+ *   signed_psbt: string (base64 or hex),
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/verify-signed-psbt', verifySignedPSBT);
+
+/**
+ * Decode PSBT or transaction
+ * Body: {
+ *   encoded_data: string (base64 or hex),
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/decode', decodePSBT);
+
+// ============================================================================
+// WALLET INTEGRATION
+// ============================================================================
+
+/**
+ * Prepare PSBT for wallet signing
+ * Body: {
+ *   unsigned_psbt: string,
+ *   signing_address: string,
+ *   network?: 'testnet' | 'mainnet',
+ *   wallet_type?: 'unisat' | 'xverse' | 'hiro'
+ * }
+ */
+router.post('/sign-psbt', signPSBTWithWallet);
+
+// ============================================================================
+// BROADCASTING
+// ============================================================================
+
+/**
+ * Broadcast signed transaction
+ * Body: {
+ *   signed_psbt: string (base64 or hex),
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+router.post('/broadcast', broadcastTransaction);
 
 export default router;

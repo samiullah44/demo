@@ -27,6 +27,7 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.2",
+    "mongoose-paginate-v2": "^1.9.1",
     "nodemailer": "^7.0.10",
     "resend": "^6.4.1",
     "tiny-secp256k1": "^2.2.4"

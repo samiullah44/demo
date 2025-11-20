@@ -24,50 +24,56 @@ const useCollectionStore = create(devtools((set, get) => ({
   cache: new Map(),
   
   // Actions for individual collections
-  fetchCollection: async (slug) => {
-    // Check in-memory cache first (5 minute cache)
-    const cached = get().cache.get(`collection_${slug}`);
-    if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
-      set({ 
-        currentCollection: cached.data, 
-        loading: false, 
-        error: null 
-      });
-      return cached.data;
+fetchCollection: async (slug) => {
+  // Check in-memory cache first (5 minute cache)
+  const cached = get().cache.get(`collection_${slug}`);
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+    set({ 
+      currentCollection: cached.data, 
+      loading: false, 
+      error: null 
+    });
+    return cached.data;
+  }
+  
+  set({ loading: true, error: null, currentCollection: null });
+  
+  try {
+    const response = await axiosInstance.get(`/collections/${slug}`);
+    
+    // FIX: Extract data from response structure
+    const collectionData = response.data.data; // ← This is the fix
+    
+    if (!collectionData) {
+      throw new Error('No collection data received');
     }
     
-    set({ loading: true, error: null, currentCollection: null });
+    // Update cache
+    get().cache.set(`collection_${slug}`, {
+      data: collectionData,
+      timestamp: Date.now()
+    });
     
-    try {
-      const response = await axiosInstance.get(`/collections/${slug}`);
-      const collectionData = response.data;
-      
-      // Update cache
-      get().cache.set(`collection_${slug}`, {
-        data: collectionData,
-        timestamp: Date.now()
-      });
-      
-      set({ 
-        currentCollection: collectionData, 
-        loading: false, 
-        error: null 
-      });
-      
-      return collectionData;
-      
-    } catch (error) {
-      console.error('Error fetching collection:', error);
-      const errorMessage = error.response?.data?.error || error.message || `Failed to fetch collection: ${slug}`;
-      
-      set({ 
-        error: errorMessage, 
-        loading: false, 
-        currentCollection: null 
-      });
-      throw new Error(errorMessage);
-    }
-  },
+    set({ 
+      currentCollection: collectionData, 
+      loading: false, 
+      error: null 
+    });
+    
+    return collectionData;
+    
+  } catch (error) {
+    console.error('Error fetching collection:', error);
+    const errorMessage = error.response?.data?.error || error.message || `Failed to fetch collection: ${slug}`;
+    
+    set({ 
+      error: errorMessage, 
+      loading: false, 
+      currentCollection: null 
+    });
+    throw new Error(errorMessage);
+  }
+},
   
   // Actions for leaderboard data
   fetchLeaderboardData: async (tab, options = {}) => {

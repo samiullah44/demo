@@ -1,3 +1,4 @@
+// models/Ordinal.js
 import mongoose from 'mongoose';
 
 const ordinalSchema = new mongoose.Schema({
@@ -10,58 +11,49 @@ const ordinalSchema = new mongoose.Schema({
   },
   inscription_number: {
     type: String,
-    index: true
-  },
-  name: { 
-    type: String, 
-    trim: true,
-    maxlength: [100, 'Name cannot exceed 100 characters'],
+    required: true,
     index: true
   },
   
-  // Collection relationship (NEW)
-  collection: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Collection',
-    index: true
-  },
-  collection_slug: {
-    type: String,
-    index: true
-  },
-  
-  image_url: { 
-    type: String,
-    validate: {
-      validator: function(v) {
-        return !v || v === 'N/A' || /^https?:\/\/.+\..+/.test(v);
-      },
-      message: 'Invalid URL format'
-    }
+  // Core inscription data from API
+  content: {
+    type: String, // content URL
+    trim: true
   },
   content_type: { 
     type: String,
     trim: true,
     index: true
   },
-  
-  // Pricing info
-  price_btc: { 
-    type: Number,
-    min: [0, 'Price cannot be negative'],
-    index: true
-  },
-  last_sale_price: {
-    type: Number,
-    default: null
-  },
-  
-  // Ownership info
-  owner: { 
+  address: {
     type: String,
     trim: true,
     index: true
   },
+  output_value: {
+    type: Number,
+    default: 0
+  },
+  sat: {
+    type: String,
+    trim: true
+  },
+  sat_rarity: {
+    type: String,
+    enum: ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'N/A'],
+    default: 'N/A',
+    index: true
+  },
+  timestamp: { 
+    type: Date,
+    index: true 
+  },
+  genesis_tx: { 
+    type: String,
+    trim: true
+  },
+  
+  // Additional metadata
   output: {
     type: String,
     trim: true
@@ -74,31 +66,10 @@ const ordinalSchema = new mongoose.Schema({
     type: Number,
     min: [0, 'Value cannot be negative']
   },
-  
-  // Rarity & attributes
-  Sat_Rarity: { 
-    type: String,
-    enum: {
-      values: ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'N/A'],
-      message: '{VALUE} is not a valid rarity'
-    },
-    default: 'N/A',
-    index: true
-  },
-  
-  // Metadata
-  metadata: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed
-  },
-  
-  timestamp: { 
-    type: Date,
-    index: true 
-  },
-  genesis_tx: { 
-    type: String,
-    trim: true
+    price_btc: {
+    type: Number,
+    required: true,
+    min: 0
   },
   
   // Status tracking
@@ -113,61 +84,68 @@ const ordinalSchema = new mongoose.Schema({
     default: null
   },
   
-  fetched_at: { 
+  // Cache management
+  last_fetched: { 
     type: Date, 
     default: Date.now,
     index: true 
   },
+  fetch_count: {
+    type: Number,
+    default: 0
+  },
+  is_stale: {
+    type: Boolean,
+    default: false
+  }
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
-// Compound indexes
-ordinalSchema.index({ price_btc: 1, Sat_Rarity: 1 });
-ordinalSchema.index({ owner: 1, fetched_at: -1 });
-ordinalSchema.index({ content_type: 1, price_btc: 1 });
-ordinalSchema.index({ collection: 1, is_listed: 1 });
-ordinalSchema.index({ is_listed: 1, price_btc: 1 });
-
-// Text search
-ordinalSchema.index({ name: 'text' });
+// Indexes
+ordinalSchema.index({ inscription_id: 1, last_fetched: -1 });
+ordinalSchema.index({ inscription_number: 1 });
+ordinalSchema.index({ last_fetched: 1 });
 
 // Virtuals
 ordinalSchema.virtual('content_url').get(function() {
-  return `https://ordinals.com/content/${this.inscription_id}`;
+  return this.content || `https://ordinals.com/content/${this.inscription_id}`;
 });
 
 // Methods
-ordinalSchema.methods.isAffordable = function(userBalance) {
-  return this.price_btc && this.price_btc <= userBalance;
-};
-
-ordinalSchema.methods.updateListing = async function(listingId, price) {
-  this.is_listed = true;
-  this.listing_id = listingId;
-  this.price_btc = price;
+ordinalSchema.methods.markAsStale = async function() {
+  this.is_stale = true;
+  this.last_fetched = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
   return this.save();
 };
 
-ordinalSchema.methods.removeListing = async function() {
-  this.is_listed = false;
-  this.listing_id = null;
-  this.price_btc = null;
+ordinalSchema.methods.updateFetchInfo = async function() {
+  this.last_fetched = new Date();
+  this.fetch_count += 1;
+  this.is_stale = false;
   return this.save();
 };
 
 // Statics
-ordinalSchema.statics.findByCollection = function(collectionId) {
-  return this.find({ collection: collectionId, is_listed: true });
+ordinalSchema.statics.findByInscriptionId = function(inscriptionId) {
+  return this.findOne({ 
+    $or: [
+      { inscription_id: inscriptionId },
+      { inscription_number: inscriptionId }
+    ]
+  });
 };
 
-ordinalSchema.statics.findListedInPriceRange = function(minPrice, maxPrice) {
+ordinalSchema.statics.findStale = function(hours = 24) {
+  const staleDate = new Date(Date.now() - hours * 60 * 60 * 1000);
   return this.find({
-    is_listed: true,
-    price_btc: { $gte: minPrice, $lte: maxPrice }
-  }).populate('collection');
+    $or: [
+      { last_fetched: { $lt: staleDate } },
+      { is_stale: true }
+    ]
+  });
 };
 
 export default mongoose.model('Ordinal', ordinalSchema);

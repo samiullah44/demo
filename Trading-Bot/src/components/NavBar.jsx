@@ -28,7 +28,7 @@ import Leaderboard from "../components/Leaderboard";
 import { useThemeStore } from "../store/useThemeStore";
 import useWalletStore from "../store/useWalletStore";
 import { useAuthStore } from "../store/useAuthStore";
-import { getInscriptionDataById } from "../lib/ordinalsService";
+import useOrdinalStore from '../store/useOrdinalStore';
 
 const NavBar = ({ onShowWalletModal }) => {
    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -40,7 +40,8 @@ const NavBar = ({ onShowWalletModal }) => {
   const [searchError, setSearchError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
-
+  
+  const { getOrdinalById } = useOrdinalStore();
   const { theme, setTheme } = useThemeStore();
   const { connected, address, walletType, balance, disconnectWallet } = useWalletStore();
   const { authUser, logout } = useAuthStore();
@@ -159,8 +160,7 @@ const NavBar = ({ onShowWalletModal }) => {
     
     return null;
   };
-
-  const handleSearch = async (e) => {
+const handleSearch = async (e) => {
     if (e) {
       e.preventDefault();
     }
@@ -180,13 +180,14 @@ const NavBar = ({ onShowWalletModal }) => {
         return;
       }
 
-      // Fetch inscription data using JSON API
-      const inscriptionData = await getInscriptionDataById(cleanQuery);
+      // Use the unified store method (which uses backend with database-first approach)
+      const result = await getOrdinalById(cleanQuery);
       
-      // Navigate to inscription detail page with the rich data
+      // Navigate to inscription detail page
       navigate(`/inscription/${cleanQuery}`, { 
         state: { 
-          inscriptionData,
+          inscriptionData: result.data,
+          source: result.source,
           searchQuery: cleanQuery
         }
       });
@@ -203,14 +204,16 @@ const NavBar = ({ onShowWalletModal }) => {
     }
   };
 
+  // Helper function to validate inscription IDs
+  const isValidInscriptionId = (id) => {
+    // Accepts both inscription numbers (12345) and full IDs (abc123def...i0)
+    return /^[a-f0-9]{64}i\d+$/.test(id) || /^\d+$/.test(id);
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleSearch(e);
     }
-  };
-  const isValidInscriptionId = (id) => {
-    // Accepts: numbers (inscription numbers) or full inscription IDs with 'i0' suffix
-    return /^\d+$/.test(id) || /^[a-f0-9]{64}i0$/.test(id);
   };
 
   const userInfo = getDisplayInfo();

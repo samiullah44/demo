@@ -1,3 +1,4 @@
+// stores/useOrdinalStore.js
 import { create } from 'zustand';
 import axiosInstance from '../lib/axios';
 
@@ -7,18 +8,62 @@ const useOrdinalStore = create((set, get) => ({
   portfolioStats: null,
   portfolioHistory: [],
   performanceMetrics: null,
+  currentOrdinal: null, // NEW: For single ordinal view
   loading: false,
   error: null,
 
+  // NEW: Get single ordinal by ID (uses our unified backend)
+  getOrdinalById: async (inscriptionId, options = {}) => {
+    try {
+      set({ loading: true, error: null, currentOrdinal: null });
+      
+      const params = new URLSearchParams();
+      if (options.refresh) params.append('refresh', options.refresh);
+      if (options.verify) params.append('verify', options.verify);
+
+      const response = await axiosInstance.get(`/ordinals/${inscriptionId}?${params}`);
+      
+      set({ 
+        currentOrdinal: response.data.data,
+        loading: false 
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching ordinal:', error);
+      set({ 
+        error: error.response?.data?.error || 'Failed to fetch ordinal',
+        loading: false 
+      });
+      throw error;
+    }
+  },
+
   // Get all ordinals from marketplace
-  getAllOrdinals: async () => {
+  getAllOrdinals: async (filters = {}) => {
     try {
       set({ loading: true, error: null });
-      const response = await axiosInstance.get('/ordinals/');
-      set({ ordinals: response.data.data || [], loading: false });
+      
+      const params = new URLSearchParams();
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) params.append(key, filters[key]);
+      });
+
+      const response = await axiosInstance.get(`/ordinals?${params}`);
+      
+      set({ 
+        ordinals: response.data.data || [], 
+        loading: false 
+      });
+      
+      return response.data;
     } catch (error) {
       console.error('Error fetching ordinals:', error);
-      set({ error: error.response?.data?.message || 'Failed to fetch ordinals', loading: false });
+      set({ 
+        error: error.response?.data?.error || 'Failed to fetch ordinals', 
+        loading: false 
+      });
+      throw error;
     }
   },
 
@@ -88,11 +133,19 @@ const useOrdinalStore = create((set, get) => ({
     }
   },
 
+  // Refresh single ordinal
+  refreshOrdinal: async (inscriptionId) => {
+    return get().getOrdinalById(inscriptionId, { refresh: true });
+  },
+
   // Refresh portfolio
   refreshPortfolio: async (address) => {
     if (!address) return;
     await get().getUserOrdinals(address);
   },
+
+  // Clear current ordinal
+  clearCurrentOrdinal: () => set({ currentOrdinal: null }),
 
   clearError: () => set({ error: null })
 }));

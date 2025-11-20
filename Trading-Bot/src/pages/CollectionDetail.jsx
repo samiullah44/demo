@@ -754,6 +754,13 @@ const CollectionDetail = () => {
     collectionsData.find(collection => collection.slug === slug),
     [slug]
   );
+  useEffect(() => {
+  if (currentCollection) {
+    console.log('🔍 Current Collection Data:', currentCollection);
+    console.log('📝 Inscriptions:', currentCollection.inscriptions);
+    console.log('📊 Inscriptions Count:', currentCollection.inscriptions?.length);
+  }
+}, [currentCollection]);
 
   // Fetch collection when slug changes
   useEffect(() => {
@@ -906,15 +913,14 @@ const CollectionDetail = () => {
   }
 
   // Render empty collection state
-  if (!currentCollection.inscriptions || currentCollection.inscriptions.length === 0) {
-    return (
-      <EmptyCollectionState 
-        collectionName={currentCollection.name || slug}
-        onBack={handleBackClick}
-      />
-    );
-  }
-
+if (!currentCollection?.inscriptions || currentCollection.inscriptions.length === 0) {
+  return (
+    <EmptyCollectionState 
+      collectionName={currentCollection?.name || slug}
+      onBack={handleBackClick}
+    />
+  );
+}
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black pt-20">
       <div className="max-w-7xl mx-auto px-4 py-8">
