@@ -44,6 +44,8 @@
         .method-buttons { display: flex; gap: 10px; margin: 10px 0; }
         .psbt-method { background: #333; padding: 10px; border-radius: 4px; margin: 5px 0; }
         .wallet-info { background: #252536; padding: 15px; border-radius: 6px; margin: 10px 0; }
+        .buyer-flow-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
+        .buyer-flow-buttons button { flex: 1; min-width: 120px; }
     </style>
 </head>
 <body>
@@ -64,7 +66,7 @@
 
         <!-- Network Warning -->
         <div class="warning" id="networkWarning" style="display: none;">
-            <strong>⚠️ Network Mismatch:</strong> Your wallet is on <span id="currentNetwork">mainnet</span> but this test requires <strong>testnet</strong>.
+            <strong>⚠️ Network Mismatch:</strong> Your wallet is on <span id="currentNetwork">mainnet</span> but this test requires <strong>testnet</span>.
         </div>
 
         <div class="tabs">
@@ -121,11 +123,11 @@
                     <label for="sellerData">Seller PSBT Data (JSON):</label>
                     <textarea id="sellerData">
 {
-    "inscription_id": "7b84375b69eb3a8f2a914e890237f35642daf223aa20b250866b33bfd4dca81fi0",
-    "inscription_output": "7b84375b69eb3a8f2a914e890237f35642daf223aa20b250866b33bfd4dca81f:0",
-    "price_sats": 5000,
-    "seller_address": "tb1qcthlw722s2tt02ftc4jl78cewq2hglgg4a6php",
-    "payment_address": "tb1qcthlw722s2tt02ftc4jl78cewq2hglgg4a6php",
+    "inscription_id": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37ei0",
+    "inscription_output": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37e:0",
+    "price_sats": 6000,
+    "seller_address": "tb1pwdfqvk837ll68ghwhlpytqdn66vxe7vtjrx6rhxv7uu4g7krf9vspaeh9m",
+    "payment_address": "tb1pwdfqvk837ll68ghwhlpytqdn66vxe7vtjrx6rhxv7uu4g7krf9vspaeh9m",
     "network": "testnet"
 }</textarea>
                 </div>
@@ -175,8 +177,8 @@
                     <label for="dummyUtxoData">Dummy UTXO Data (JSON):</label>
                     <textarea id="dummyUtxoData">
 {
-    "payer_address": "tb1qcthlw722s2tt02ftc4jl78cewq2hglgg4a6php",
-    "number_of_dummy_utxos": 2,
+    "payer_address": "",
+    "number_of_dummy_utxos": 1,
     "network": "testnet",
     "fee_level": "hourFee"
 }</textarea>
@@ -191,21 +193,42 @@
                     <label for="buyerData">Buyer PSBT Data (JSON):</label>
                     <textarea id="buyerData">
 {
-    "listing_id": "YOUR_LISTING_ID_HERE",
-    "buyer_payment_address": "tb1qcthlw722s2tt02ftc4jl78cewq2hglgg4a6php",
-    "buyer_receive_address": "tb1qcthlw722s2tt02ftc4jl78cewq2hglgg4a6php",
+    "listing_id": "",
+    "buyer_payment_address": "",
+    "buyer_receive_address": "",
     "fee_level": "hourFee",
     "network": "testnet"
 }</textarea>
                 </div>
                 <button onclick="generateBuyerPSBT()" class="compat-btn">Generate Buyer PSBT</button>
+                
+                <div class="form-group">
+                    <label for="buyerUnsignedPSBT">Generated Buyer Unsigned PSBT:</label>
+                    <textarea id="buyerUnsignedPSBT" placeholder="Buyer unsigned PSBT will appear here..."></textarea>
+                </div>
+                
                 <div id="buyerGenerateResult" class="result"></div>
             </div>
 
             <div class="step">
-                <h3><span class="step-number">3</span> Sign & Broadcast</h3>
-                <button onclick="signBuyerPSBT()" class="secondary">Sign Buyer PSBT</button>
-                <button onclick="broadcastTransaction()" class="compat-btn">Broadcast Transaction</button>
+                <h3><span class="step-number">3</span> Complete Purchase Flow</h3>
+                
+                <div class="buyer-flow-buttons">
+                    <button onclick="signBuyerPSBT()" class="secondary" id="signBuyerBtn">🔏 Sign Buyer PSBT</button>
+                    <button onclick="verifyBuyerPSBT()" class="warning" id="verifyBuyerBtn">✅ Verify Buyer PSBT</button>
+                    <button onclick="broadcastBuyerTransaction()" class="compat-btn" id="broadcastBuyerBtn">📡 Broadcast Transaction</button>
+                </div>
+                
+                <div class="form-group">
+                    <label for="buyerSignedPSBT">Buyer Signed PSBT:</label>
+                    <textarea id="buyerSignedPSBT" placeholder="Buyer signed PSBT will appear here..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="broadcastResult">Broadcast Result:</label>
+                    <textarea id="broadcastResult" placeholder="Transaction broadcast result will appear here..."></textarea>
+                </div>
+                
                 <div id="buyerBroadcastResult" class="result"></div>
             </div>
         </div>
@@ -293,6 +316,8 @@
         let currentWalletNetwork = '';
         let currentUnsignedPSBT = '';
         let currentSignedPSBT = '';
+        let currentBuyerUnsignedPSBT = '';
+        let currentBuyerSignedPSBT = '';
 
         // Initialize on load
         window.addEventListener('load', function() {
@@ -387,6 +412,7 @@
                 document.getElementById('signBtn').disabled = false;
                 document.getElementById('signSafeBtn').disabled = false;
                 document.getElementById('infoBtn').disabled = false;
+                document.getElementById('signBuyerBtn').disabled = false;
                 
                 walletStatus.innerHTML = `✅ Connected!\nAddress: ${currentWalletAddress}\nNetwork: ${currentWalletNetwork}`;
                 walletStatus.className = 'status connected';
@@ -542,57 +568,58 @@
         }
 
         // Sign PSBT
-// Enhanced signing function
-async function signPSBT() {
-    try {
-        if (!isWalletConnected) throw new Error('Connect wallet first');
-        
-        const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
-        if (!unsignedPSBT) throw new Error('No PSBT to sign');
-
-        showResult('sellerSignResult', '🔄 Signing PSBT for listing...', 'info');
-        
-        let signedPSBT;
-        
-        try {
-            // First try standard signing
-            signedPSBT = await window.unisat.signPsbt(unsignedPSBT);
-        } catch (error) {
-            console.log('Standard signing failed:', error.message);
-            
-            // If standard fails, try with explicit options
+        async function signPSBT() {
             try {
-                signedPSBT = await window.unisat.signPsbt(unsignedPSBT, {
-                    autoFinalized: false,
-                    sighashTypes: ['SIGHASH_ALL']
-                });
-            } catch (secondError) {
-                throw new Error(`Signing failed: ${secondError.message}. Make sure you own the inscription and have sufficient funds.`);
+                if (!isWalletConnected) throw new Error('Connect wallet first');
+                
+                const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
+                if (!unsignedPSBT) throw new Error('No PSBT to sign');
+
+                showResult('sellerSignResult', '🔄 Signing PSBT for listing...', 'info');
+                
+                let signedPSBT;
+                
+                try {
+                    // First try standard signing
+                    signedPSBT = await window.unisat.signPsbt(unsignedPSBT);
+                } catch (error) {
+                    console.log('Standard signing failed:', error.message);
+                    
+                    // If standard fails, try with explicit options
+                    try {
+                        signedPSBT = await window.unisat.signPsbt(unsignedPSBT, {
+                            autoFinalized: false,
+                            sighashTypes: ['SIGHASH_ALL']
+                        });
+                    } catch (secondError) {
+                        throw new Error(`Signing failed: ${secondError.message}. Make sure you own the inscription and have sufficient funds.`);
+                    }
+                }
+                
+                currentSignedPSBT = signedPSBT;
+                document.getElementById('signedPSBT').value = signedPSBT;
+                
+                showResult('sellerSignResult', 
+                    '✅ PSBT signed successfully!\n\n' +
+                    '💡 The PSBT is now ready for listing creation.\n' +
+                    'Note: Some finalization warnings are normal for Taproot PSBTs.', 
+                    'success'
+                );
+                
+            } catch (error) {
+                showResult('sellerSignResult', 
+                    `❌ Signing failed: ${error.message}\n\n` +
+                    '🔧 Troubleshooting:\n' +
+                    '• Ensure you own the inscription\n' + 
+                    '• Check wallet has funds for fees\n' +
+                    '• Verify wallet is on testnet\n' +
+                    '• Try generating a new PSBT', 
+                    'error'
+                );
             }
         }
-        
-        currentSignedPSBT = signedPSBT;
-        document.getElementById('signedPSBT').value = signedPSBT;
-        
-        showResult('sellerSignResult', 
-            '✅ PSBT signed successfully!\n\n' +
-            '💡 The PSBT is now ready for listing creation.\n' +
-            'Note: Some finalization warnings are normal for Taproot PSBTs.', 
-            'success'
-        );
-        
-    } catch (error) {
-        showResult('sellerSignResult', 
-            `❌ Signing failed: ${error.message}\n\n` +
-            '🔧 Troubleshooting:\n' +
-            '• Ensure you own the inscription\n' + 
-            '• Check wallet has funds for fees\n' +
-            '• Verify wallet is on testnet\n' +
-            '• Try generating a new PSBT', 
-            'error'
-        );
-    }
-}     // Safe mode signing
+
+        // Safe mode signing
         async function signPSBTSafe() {
             try {
                 if (!isWalletConnected) throw new Error('Connect wallet first');
@@ -678,25 +705,144 @@ async function signPSBT() {
         async function generateBuyerPSBT() {
             try {
                 const data = JSON.parse(document.getElementById('buyerData').value);
-                await callAPI('generate-buyer', data, 'buyerGenerateResult');
+                const result = await callAPI('generate-buyer', data, 'buyerGenerateResult');
+                
+                if (result && result.data && result.data.unsigned_psbt) {
+                    currentBuyerUnsignedPSBT = result.data.unsigned_psbt;
+                    document.getElementById('buyerUnsignedPSBT').value = currentBuyerUnsignedPSBT;
+                    document.getElementById('buyerSignedPSBT').value = '';
+                    document.getElementById('broadcastResult').value = '';
+                }
             } catch (error) {
                 showResult('buyerGenerateResult', `❌ Invalid JSON: ${error.message}`, 'error');
             }
         }
 
+        // Sign Buyer PSBT using backend endpoint
         async function signBuyerPSBT() {
-            // Similar to seller signing but for buyer PSBT
-            showResult('buyerBroadcastResult', '🔄 Use the Seller Flow tab to sign PSBTs', 'info');
+            try {
+                const buyerUnsignedPSBT = document.getElementById('buyerUnsignedPSBT').value.trim();
+                if (!buyerUnsignedPSBT) {
+                    throw new Error('No buyer PSBT to sign. Generate buyer PSBT first.');
+                }
+
+                if (!isWalletConnected) {
+                    throw new Error('Connect wallet first');
+                }
+
+                showResult('buyerBroadcastResult', '🔄 Signing buyer PSBT with your wallet...', 'info');
+
+                // Sign using Unisat wallet (frontend signing)
+                const signedPSBT = await window.unisat.signPsbt(buyerUnsignedPSBT, {
+                    autoFinalized: false,
+                    sighashTypes: ['SIGHASH_ALL']
+                });
+
+                currentBuyerSignedPSBT = signedPSBT;
+                document.getElementById('buyerSignedPSBT').value = signedPSBT;
+
+                showResult('buyerBroadcastResult', 
+                    '✅ Buyer PSBT signed successfully!\n\n' +
+                    'Next: Verify the signed PSBT before broadcasting.', 
+                    'success'
+                );
+
+            } catch (error) {
+                showResult('buyerBroadcastResult', 
+                    `❌ Buyer PSBT signing failed: ${error.message}\n\n` +
+                    '🔧 Troubleshooting:\n' +
+                    '• Make sure you have sufficient funds\n' +
+                    '• Check wallet is connected\n' +
+                    '• Verify the PSBT was generated correctly', 
+                    'error'
+                );
+            }
         }
 
-        async function broadcastTransaction() {
-            const signedPSBT = document.getElementById('signedPSBT').value.trim();
-            if (!signedPSBT) {
-                showResult('buyerBroadcastResult', '❌ No signed PSBT to broadcast', 'error');
-                return;
-            }
+        // Verify Buyer PSBT using backend endpoint
+        async function verifyBuyerPSBT() {
+            try {
+                const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+                if (!signedPSBT) {
+                    throw new Error('No signed PSBT to verify. Sign the buyer PSBT first.');
+                }
 
-            await callAPI('broadcast', { signed_psbt: signedPSBT }, 'buyerBroadcastResult');
+                const buyerData = JSON.parse(document.getElementById('buyerData').value);
+                const network = buyerData.network || 'testnet';
+
+                const result = await callAPI('verify-signed-psbt', { 
+                    signed_psbt: signedPSBT,
+                    network: network
+                }, 'buyerBroadcastResult');
+
+                if (result && result.data) {
+                    if (result.data.isFullySigned && result.data.canFinalize) {
+                        showResult('buyerBroadcastResult', 
+                            '✅ PSBT verified and ready for broadcast!\n\n' +
+                            `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
+                            `Fully Signed: ${result.data.isFullySigned}\n` +
+                            `Can Finalize: ${result.data.canFinalize}\n\n` +
+                            'You can now broadcast the transaction.', 
+                            'success'
+                        );
+                    } else {
+                        showResult('buyerBroadcastResult', 
+                            '⚠️ PSBT verification warning:\n\n' +
+                            `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
+                            `Fully Signed: ${result.data.isFullySigned}\n` +
+                            `Can Finalize: ${result.data.canFinalize}\n\n` +
+                            'Some signatures may be missing or incomplete.', 
+                            'warning'
+                        );
+                    }
+                }
+
+            } catch (error) {
+                showResult('buyerBroadcastResult', `❌ PSBT verification failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Broadcast Buyer Transaction using backend endpoint
+        async function broadcastBuyerTransaction() {
+            try {
+                const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+                if (!signedPSBT) {
+                    throw new Error('No signed PSBT to broadcast. Sign and verify the PSBT first.');
+                }
+
+                const buyerData = JSON.parse(document.getElementById('buyerData').value);
+                const network = buyerData.network || 'testnet';
+
+                showResult('buyerBroadcastResult', '📡 Broadcasting transaction to blockchain...', 'info');
+
+                const result = await callAPI('broadcast', { 
+                    signed_psbt: signedPSBT,
+                    network: network
+                }, 'buyerBroadcastResult');
+
+                if (result && result.data) {
+                    document.getElementById('broadcastResult').value = JSON.stringify(result.data, null, 2);
+                    
+                    showResult('buyerBroadcastResult', 
+                        '🎉 Transaction broadcast successfully!\n\n' +
+                        `Transaction ID: ${result.data.txid}\n` +
+                        `Network: ${result.data.network}\n` +
+                        `Explorer: ${result.data.explorer_url || 'N/A'}\n\n` +
+                        'Your ordinal purchase is being processed!', 
+                        'success'
+                    );
+                }
+
+            } catch (error) {
+                showResult('buyerBroadcastResult', 
+                    `❌ Broadcast failed: ${error.message}\n\n` +
+                    '🔧 Troubleshooting:\n' +
+                    '• Check if PSBT is fully signed\n' +
+                    '• Verify network compatibility\n' +
+                    '• Ensure sufficient fee coverage', 
+                    'error'
+                );
+            }
         }
 
         // Utility functions

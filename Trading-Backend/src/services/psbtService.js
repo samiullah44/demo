@@ -6,13 +6,14 @@ import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from 'tiny-secp256k1';
 import { initEccLib } from 'bitcoinjs-lib';
 import { AppError } from '../middleware/errorHandler.js';
+import mongoose from 'mongoose';
 
 // Initialize ECC library
 initEccLib(ecc);
 
 // Network configuration - make it dynamic
 let currentNetwork; // Default to testnet
-let isTestnet;
+let isTestnet=true;
 
 // Constants from Claude's implementation
 const DUMMY_UTXO_VALUE = 1000; // 1000 sats for dummy UTXO
@@ -49,22 +50,28 @@ export const getNetworkInfo = () => {
   };
 };
 
-// Get appropriate API endpoints based on network
-export const getNetworkConfig = () => {
-  if (isTestnet) {
-    return {
-      ordinalsExplorerUrl: "https://testnet.ordinals.com",
-      baseMempoolUrl: "https://mempool.space/testnet",
-      baseMempoolApiUrl: "https://mempool.space/testnet/api",
-      networkName: "testnet"
-    };
-  } else {
-    return {
-      ordinalsExplorerUrl: "https://ordinals.com",
-      baseMempoolUrl: "https://mempool.space",
-      baseMempoolApiUrl: "https://mempool.space/api",
-      networkName: "mainnet"
-    };
+const getNetworkConfig = (networkType = 'testnet') => {
+  const isTestnet = networkType === 'testnet';
+  
+  return {
+    isProduction: !isTestnet,
+    ordinalsExplorerUrl: isTestnet ? "https://testnet.ordinals.com" : "https://ordinals.com",
+    baseMempoolUrl: isTestnet ? "https://mempool.space/testnet" : "https://mempool.space",
+    baseMempoolApiUrl: isTestnet ? "https://mempool.space/testnet/api" : "https://mempool.space/api",
+    networkName: isTestnet ? "testnet" : "mainnet",
+    bitcoinPriceApiUrl: "https://blockchain.info/ticker?cors=true",
+    network: isTestnet ? bitcoin.networks.testnet : bitcoin.networks.bitcoin
+  };
+};
+
+export const getBitcoinPrice = async () => {
+  try {
+    const response = await fetch("https://blockchain.info/ticker?cors=true");
+    const data = await response.json();
+    return data.USD.last;
+  } catch (error) {
+    console.error('Error fetching Bitcoin price:', error);
+    return 80000;
   }
 };
 
@@ -72,9 +79,10 @@ export const getNetworkConfig = () => {
 // ADDRESS UTILITIES
 // ============================================================================
 
-// ✅ NEW: Enhanced address type detection
-export const getAddressType = (address) => {
+export const getAddressType = (address, networkType = 'testnet') => {
   try {
+    const { network } = getNetworkConfig(networkType);
+    
     // Method 1: Try to decode as bech32 (Taproot or Native SegWit)
     if (address.startsWith('bc1') || address.startsWith('tb1') || address.startsWith('bcrt1')) {
       const decoded = bitcoin.address.fromBech32(address);
@@ -93,9 +101,9 @@ export const getAddressType = (address) => {
     try {
       const decoded = bitcoin.address.fromBase58Check(address);
       
-      if (decoded.version === currentNetwork.pubKeyHash) {
+      if (decoded.version === network.pubKeyHash) {
         return 'p2pkh'; // Legacy
-      } else if (decoded.version === currentNetwork.scriptHash) {
+      } else if (decoded.version === network.scriptHash) {
         return 'p2sh'; // Nested SegWit
       }
     } catch (e) {
@@ -119,14 +127,23 @@ export const isNativeSegwitAddress = (address) => {
   return getAddressType(address) === 'p2wpkh';
 };
 
-// ✅ NEW: Validate address specifically for Ordinals (must be Taproot)
-export const validateOrdinalAddress = (address) => {
-  const addressType = getAddressType(address);
+export const validateOrdinalAddress = (address, networkType = 'testnet') => {
+  const addressType = getAddressType(address, networkType);
+  const { networkName } = getNetworkConfig(networkType);
   
   if (addressType !== 'p2tr') {
     throw new AppError(
       `Invalid address type for Ordinals. Expected Taproot (P2TR) but got ${addressType.toUpperCase()}. ` +
-      `Ordinals can only be created, stored, and transferred using Taproot addresses (starting with ${isTestnet ? 'tb1p' : 'bc1p'}).`,
+      `Ordinals can only be created, stored, and transferred using Taproot addresses (starting with ${networkType === 'testnet' ? 'tb1p' : 'bc1p'}).`,
+      400
+    );
+  }
+  
+  // Additional format validation
+  const expectedPrefix = networkType === 'testnet' ? 'tb1p' : 'bc1p';
+  if (!address.startsWith(expectedPrefix)) {
+    throw new AppError(
+      `Invalid ${networkName} Taproot address format. Expected address starting with "${expectedPrefix}"`,
       400
     );
   }
@@ -134,7 +151,6 @@ export const validateOrdinalAddress = (address) => {
   return true;
 };
 
-// ✅ UPDATED: Enhanced address validation with type information
 export const validateAddress = (address, requireTaproot = false) => {
   try {
     // Method 1: Try toOutputScript first (most reliable)
@@ -203,7 +219,6 @@ export const validateAddress = (address, requireTaproot = false) => {
   }
 };
 
-// ✅ UPDATED: Enhanced address validation for PSBT generation
 const validateAddressForPSBT = (address, options = {}) => {
   const { requireTaproot = false, requireOrdinalCompatible = false } = options;
   
@@ -554,11 +569,9 @@ const getTestnetInscriptionData = async (inscriptionId) => {
  */
 export const getRecommendedFeeRates = async (networkType = 'testnet') => {
   try {
-    const baseUrl = networkType === 'testnet' 
-      ? 'https://mempool.space/testnet/api'
-      : 'https://mempool.space/api';
+    const { baseMempoolApiUrl } = getNetworkConfig(networkType);
     
-    const response = await fetch(`${baseUrl}/v1/fees/recommended`);
+    const response = await fetch(`${baseMempoolApiUrl}/v1/fees/recommended`);
     if (!response.ok) {
       throw new Error('Failed to fetch fee rates');
     }
@@ -576,7 +589,6 @@ export const getRecommendedFeeRates = async (networkType = 'testnet') => {
     };
   } catch (error) {
     console.error('Error fetching fee rates:', error);
-    // Fallback to safe defaults
     return {
       fastestFee: 20,
       halfHourFee: 15,
@@ -586,7 +598,16 @@ export const getRecommendedFeeRates = async (networkType = 'testnet') => {
     };
   }
 };
+export const calculateFee = (vins, vouts, recommendedFeeRate, includeChangeOutput = true) => {
+  const baseTxSize = 10;
+  const inSize = 180;
+  const outSize = 34;
 
+  const txSize = baseTxSize + (vins * inSize) + (vouts * outSize) + (includeChangeOutput * outSize);
+  const fee = txSize * recommendedFeeRate;
+
+  return fee;
+};
 /**
  * Estimate transaction virtual size
  * More accurate calculation based on input/output types
@@ -613,7 +634,7 @@ export const estimateTransactionVSize = (inputs, outputs) => {
   
   // Calculate input sizes
   for (const input of inputs) {
-    const inputType = input.type || 'p2wpkh'; // Default to SegWit
+    const inputType = input.type || 'p2wpkh';
     vsize += inputSizes[inputType] || 68;
   }
   
@@ -626,9 +647,6 @@ export const estimateTransactionVSize = (inputs, outputs) => {
   return Math.ceil(vsize);
 };
 
-/**
- * Calculate total fee for transaction
- */
 export const calculateTransactionFee = (vsize, feeRate) => {
   return Math.ceil(vsize * feeRate);
 };
@@ -642,13 +660,11 @@ export const calculateTransactionFee = (vsize, feeRate) => {
  */
 export const fetchAddressUtxos = async (address, networkType = 'testnet') => {
   try {
-    const baseUrl = networkType === 'testnet'
-      ? 'https://mempool.space/testnet/api'
-      : 'https://mempool.space/api';
+    const { baseMempoolApiUrl } = getNetworkConfig(networkType);
     
     console.log(`🔍 Fetching UTXOs for address: ${address}`);
     
-    const response = await fetch(`${baseUrl}/address/${address}/utxo`);
+    const response = await fetch(`${baseMempoolApiUrl}/address/${address}/utxo`);
     if (!response.ok) {
       throw new Error(`Failed to fetch UTXOs: ${response.status}`);
     }
@@ -675,34 +691,55 @@ export const fetchAddressUtxos = async (address, networkType = 'testnet') => {
 /**
  * Check if a UTXO contains an inscription - IMPROVED VERSION
  */
+/**
+ * Check if UTXO contains inscription - Enhanced with Unisat API for testnet
+ */
 export const doesUtxoContainInscription = async (utxo, networkType = 'testnet') => {
   try {
-    // Use Hiro API for more reliable inscription detection
-    const hiroUrl = networkType === 'testnet'
-      ? 'https://api.testnet.hiro.so/ordinals/v1'
-      : 'https://api.hiro.so/ordinals/v1';
-    
-    // Check if this UTXO has any inscriptions
-    const response = await fetch(`${hiroUrl}/inscriptions?output=${utxo.txid}:${utxo.vout}`);
-    
-    if (!response.ok) {
-      // If API fails, fall back to conservative approach
-      console.warn(`Hiro API failed for ${utxo.txid}:${utxo.vout}, assuming no inscription`);
+    if (networkType === 'testnet') {
+      // Use Unisat API for testnet
+      const unisatUrl = 'https://open-api-testnet.unisat.io/v1/indexer/utxo';
+      const response = await fetch(`${unisatUrl}/${utxo.txid}/${utxo.vout}`, {
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.warn(`Unisat API failed for ${utxo.txid}:${utxo.vout}, status: ${response.status}`);
+        return false; // Conservative approach
+      }
+      
+      const data = await response.json();
+      
+      // Check if UTXO has inscriptions
+      if (data.code === 0 && data.data) {
+        const hasInscription = data.data.inscriptionsCount > 0 || 
+                              (data.data.inscriptions && data.data.inscriptions.length > 0);
+        
+        if (hasInscription) {
+          console.log(`⚠️ UTXO ${utxo.txid}:${utxo.vout} contains ${data.data.inscriptionsCount} inscription(s) - skipping`);
+        }
+        
+        return hasInscription;
+      }
+      
+      // If data is null, no UTXO found or no inscriptions
       return false;
+      
+    } else {
+      // Use ordinals.com for mainnet (original method)
+      const { ordinalsExplorerUrl } = getNetworkConfig(networkType);
+      
+      const html = await fetch(`${ordinalsExplorerUrl}/output/${utxo.txid}:${utxo.vout}`)
+        .then(response => response.text());
+
+      return html.match(/class=thumbnails/) !== null;
     }
-    
-    const data = await response.json();
-    const hasInscription = data.inscriptions && data.inscriptions.length > 0;
-    
-    if (hasInscription) {
-      console.log(`⚠️ UTXO ${utxo.txid}:${utxo.vout} contains ${data.inscriptions.length} inscription(s) - skipping`);
-    }
-    
-    return hasInscription;
     
   } catch (error) {
     console.warn(`Could not check inscription for ${utxo.txid}:${utxo.vout}: ${error.message}`);
-    // Conservative approach: if check fails, assume NO inscription (allows spending)
+    // Conservative approach: if check fails, assume NO inscription
     return false;
   }
 };
@@ -722,7 +759,7 @@ export const selectPaymentUtxos = async (
   const selectedUtxos = [];
   let totalSelected = 0;
   
-  // Filter and sort UTXOs
+  // Filter and sort UTXOs (exclude dummy UTXOs and sort by value descending)
   const candidateUtxos = allUtxos
     .filter(utxo => {
       const isNotDummy = utxo.value > DUMMY_UTXO_VALUE;
@@ -731,12 +768,12 @@ export const selectPaymentUtxos = async (
       }
       return isNotDummy;
     })
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => b.value - a.value); // Sort descending by value
   
   console.log(`📋 Candidate UTXOs after filtering: ${candidateUtxos.length}`);
   
   for (const utxo of candidateUtxos) {
-    // Check if UTXO contains inscription
+    // Check if UTXO contains inscription (OpenOrdex method)
     const hasInscription = await doesUtxoContainInscription(utxo, networkType);
     
     if (hasInscription) {
@@ -749,7 +786,7 @@ export const selectPaymentUtxos = async (
     
     console.log(`  ✅ Selected UTXO: ${utxo.txid}:${utxo.vout} (${utxo.value} sats)`);
     
-    // Check if we have enough
+    // Check if we have enough (including buffer)
     if (totalSelected >= requiredAmount + additionalFeeBuffer) {
       console.log(`✅ Sufficient funds: ${totalSelected} sats selected`);
       break;
@@ -795,6 +832,143 @@ export const findDummyUtxo = async (allUtxos, networkType = 'testnet') => {
   return null;
 };
 
+
+export const parsePSBT = (psbtData, networkType = 'testnet') => {
+  try {
+    const { network } = getNetworkConfig(networkType);
+    
+    console.log('🔍 Parsing PSBT data...');
+    console.log('Data length:', psbtData.length);
+    console.log('First 20 chars:', psbtData.substring(0, 20));
+
+    let psbt;
+    let format = 'unknown';
+
+    // Try different parsing methods
+    try {
+      // Method 1: Try as base64 PSBT
+      psbt = bitcoin.Psbt.fromBase64(psbtData, { network });
+      format = 'base64';
+      console.log('✅ Parsed as base64 PSBT');
+    } catch (base64Error) {
+      console.log('❌ Base64 parsing failed, trying hex...');
+      
+      try {
+        // Method 2: Try as hex PSBT
+        // Check if it looks like hex (only hex characters and even length)
+        if (psbtData.match(/^[0-9a-fA-F]+$/) && psbtData.length % 2 === 0) {
+          const buffer = Buffer.from(psbtData, 'hex');
+          psbt = bitcoin.Psbt.fromBuffer(buffer, { network });
+          format = 'hex';
+          console.log('✅ Parsed as hex PSBT');
+        } else {
+          throw new Error('Not a valid hex string');
+        }
+      } catch (hexError) {
+        console.log('❌ Hex parsing failed:', hexError.message);
+        
+        // Method 3: Try as raw transaction (fallback)
+        try {
+          // Check if it might be a raw transaction
+          if (psbtData.length >= 64) {
+            // Try to parse as transaction hex
+            const tx = bitcoin.Transaction.fromHex(psbtData);
+            console.log('⚠️ Data appears to be a raw transaction, not PSBT');
+            
+            // Convert transaction to PSBT for compatibility
+            psbt = new bitcoin.Psbt({ network });
+            tx.ins.forEach((input, index) => {
+              psbt.addInput({
+                hash: input.hash,
+                index: input.index,
+                sequence: input.sequence,
+              });
+            });
+            tx.outs.forEach((output, index) => {
+              psbt.addOutput({
+                script: output.script,
+                value: output.value,
+              });
+            });
+            format = 'transaction_hex';
+          } else {
+            throw new Error('Data too short for transaction');
+          }
+        } catch (txError) {
+          console.log('❌ Transaction parsing failed:', txError.message);
+          throw new AppError(
+            `Invalid PSBT format. Tried base64, hex, and transaction formats. ` +
+            `Error: ${base64Error.message}`,
+            400
+          );
+        }
+      }
+    }
+
+    return {
+      psbt,
+      format,
+      isValid: true,
+      inputCount: psbt.txInputs.length,
+      outputCount: psbt.txOutputs.length
+    };
+
+  } catch (error) {
+    console.error('❌ PSBT parsing failed:', error);
+    throw new AppError(`Failed to parse PSBT: ${error.message}`, 400);
+  }
+};
+
+/**
+ * Validate and normalize PSBT data from database
+ */
+export const normalizeSellerPSBT = (listing) => {
+  try {
+    if (!listing.signed_psbt) {
+      throw new AppError('No signed PSBT found in listing', 400);
+    }
+
+    console.log('🔄 Normalizing seller PSBT from database...');
+    
+    // Try to parse the PSBT data
+    const parsed = parsePSBT(listing.signed_psbt, listing.network || 'testnet');
+    
+    // Validate PSBT structure
+    if (parsed.psbt.txInputs.length !== 1 || parsed.psbt.txOutputs.length !== 1) {
+      throw new AppError('Invalid seller PSBT structure: expected 1 input and 1 output', 400);
+    }
+
+    // Verify the PSBT matches the listing inscription
+    const input = parsed.psbt.txInputs[0];
+    console.log('Input is',input);
+    const psbtInput = `${input.hash.reverse().toString('hex')}:${input.index}`;
+    console.log('psbtInput is',psbtInput);
+    
+    if (psbtInput !== listing.inscription_output) {
+      throw new AppError(
+        `PSBT input (${psbtInput}) does not match listing inscription (${listing.inscription_output})`,
+        400
+      );
+    }else{
+      console.log("mtaches inscrpttion")
+    }
+
+    console.log('✅ Seller PSBT normalized successfully');
+    console.log('📊 Format:', parsed.format);
+    console.log('🔗 Input matches listing:', psbtInput === listing.inscription_output);
+
+    return {
+      psbt: parsed.psbt,
+      format: parsed.format,
+      input: psbtInput,
+      output: parsed.psbt.txOutputs[0]
+    };
+
+  } catch (error) {
+    console.error('❌ Seller PSBT normalization failed:', error);
+    throw new AppError(`Invalid seller PSBT in listing: ${error.message}`, 400);
+  }
+};
 // ============================================================================
 // TRANSACTION UTILITIES
 // ============================================================================
@@ -804,12 +978,9 @@ export const findDummyUtxo = async (allUtxos, networkType = 'testnet') => {
  */
 export const getTransactionHex = async (txid, networkType = 'testnet') => {
   try {
-    const baseUrl = networkType === 'testnet'
-      ? 'https://mempool.space/testnet/api'
-      : 'https://mempool.space/api';
+    const { baseMempoolApiUrl } = getNetworkConfig(networkType);
     
-    const response = await fetch(`${baseUrl}/tx/${txid}/hex`);
-    console.log("response",response);
+    const response = await fetch(`${baseMempoolApiUrl}/tx/${txid}/hex`);
     if (!response.ok) {
       throw new Error(`Transaction not found: ${response.status}`);
     }
@@ -833,6 +1004,298 @@ export const btcToSats = (value) => {
   // If value is in BTC (float string), convert to sats
   return Math.round(parseFloat(value) * Math.pow(10, 8));
 };
+export const satToBtc = (sats) => {
+  return Number(sats) / Math.pow(10, 8);
+};
+
+export const satsToFormattedDollarString = async (sats) => {
+  const btcPrice = await getBitcoinPrice();
+  return (satToBtc(sats) * btcPrice).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+};
+
+
+
+export const signDummyUtxoPSBT = async (unsignedPsbtBase64, networkType = 'testnet') => {
+  try {
+    console.log('🔏 Signing dummy UTXO PSBT...');
+    
+    const { network } = getNetworkConfig(networkType);
+
+    // Validate PSBT format
+    let psbt;
+    try {
+      psbt = bitcoin.Psbt.fromBase64(unsignedPsbtBase64, { network });
+    } catch (error) {
+      throw new AppError(`Invalid PSBT format: ${error.message}`, 400);
+    }
+
+    console.log(`📦 PSBT details - Inputs: ${psbt.txInputs.length}, Outputs: ${psbt.txOutputs.length}`);
+
+    // For backend signing simulation
+    // In production, this would integrate with actual wallet APIs
+    const signedPSBT = await simulateDummyUtxoSigning(psbt, networkType);
+
+    return {
+      signed_psbt: signedPSBT,
+      network: networkType,
+      inputs_count: psbt.txInputs.length,
+      outputs_count: psbt.txOutputs.length,
+      next_step: 'Broadcast the signed PSBT using /broadcast-dummy-utxo endpoint'
+    };
+
+  } catch (error) {
+    console.error('❌ Dummy UTXO PSBT signing error:', error);
+    throw new AppError(`Failed to sign dummy UTXO PSBT: ${error.message}`, 500);
+  }
+};
+
+/**
+ * Broadcast signed dummy UTXO transaction
+ * Body: {
+ *   signed_psbt: string (base64),
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+export const broadcastDummyUtxoTransaction = async (signedPsbtBase64, networkType = 'testnet') => {
+  try {
+    console.log('📤 Broadcasting dummy UTXO transaction...');
+
+    const { network, baseMempoolApiUrl } = getNetworkConfig(networkType);
+
+    let txHex;
+    let txId;
+
+    try {
+      // Try to parse as PSBT first
+      const psbt = bitcoin.Psbt.fromBase64(signedPsbtBase64, { network });
+      
+      // Finalize all inputs if not already finalized
+      for (let i = 0; i < psbt.inputCount; i++) {
+        try {
+          psbt.finalizeInput(i);
+        } catch (e) {
+          // Input might already be finalized, continue
+          console.log(`Input ${i} already finalized or can't be finalized:`, e.message);
+        }
+      }
+
+      const tx = psbt.extractTransaction();
+      txHex = tx.toHex();
+      txId = tx.getId();
+
+    } catch (psbtError) {
+      // If PSBT parsing fails, try as raw transaction hex
+      console.log('Not a PSBT, trying as raw transaction...');
+      
+      if (signedPsbtBase64.length === 64 || signedPsbtBase64.match(/^[0-9a-fA-F]{64}$/)) {
+        throw new AppError('Provided data appears to be a TXID. Please provide the signed PSBT or raw transaction hex.', 400);
+      }
+      
+      // Try to parse as hex
+      const tx = bitcoin.Transaction.fromHex(signedPsbtBase64);
+      txHex = signedPsbtBase64;
+      txId = tx.getId();
+    }
+
+    console.log(`📊 Transaction ID: ${txId}`);
+
+    // Broadcast to mempool
+    const broadcastResponse = await fetch(`${baseMempoolApiUrl}/tx`, {
+      method: 'POST',
+      body: txHex,
+      headers: {
+        'Content-Type': 'text/plain'
+      }
+    });
+
+    if (!broadcastResponse.ok) {
+      const errorText = await broadcastResponse.text();
+      throw new Error(`Mempool API error: ${broadcastResponse.status} - ${errorText}`);
+    }
+
+    const broadcastTxId = await broadcastResponse.text();
+
+    // Verify the TXID matches
+    if (broadcastTxId !== txId) {
+      console.warn(`TXID mismatch: expected ${txId}, got ${broadcastTxId}`);
+    }
+
+    console.log('✅ Dummy UTXO transaction broadcasted successfully!');
+
+    return {
+      txid: broadcastTxId,
+      network: networkType,
+      explorer_url: `${getNetworkConfig(networkType).baseMempoolUrl}/tx/${broadcastTxId}`,
+      status: 'broadcasted',
+      timestamp: new Date().toISOString(),
+      next_steps: [
+        'Wait for transaction confirmation',
+        'Check status using /transaction-status endpoint',
+        'After confirmation, you can proceed with ordinal purchases'
+      ]
+    };
+
+  } catch (error) {
+    console.error('❌ Dummy UTXO broadcast failed:', error);
+    throw new AppError(`Broadcast failed: ${error.message}`, 500);
+  }
+};
+
+/**
+ * Complete dummy UTXO creation flow (all in one)
+ * Body: {
+ *   payer_address: string,
+ *   number_of_dummy_utxos?: number,
+ *   network?: 'testnet' | 'mainnet',
+ *   fee_level?: 'hourFee'
+ * }
+ */
+export const createDummyUtxoComplete = async (
+  payerAddress,
+  numberOfDummyUtxos = 1,
+  networkType = 'testnet',
+  feeLevel = 'hourFee'
+) => {
+  try {
+    console.log('🚀 Starting complete dummy UTXO creation flow...');
+
+    // Step 1: Generate PSBT
+    console.log('📝 Step 1: Generating PSBT...');
+    const generateResult = await generateDummyUtxoPSBT(
+      payerAddress,
+      numberOfDummyUtxos,
+      networkType,
+      feeLevel
+    );
+
+    // Step 2: Sign PSBT
+    console.log('🔏 Step 2: Signing PSBT...');
+    const signResult = await signDummyUtxoPSBT(
+      generateResult.psbt,
+      networkType
+    );
+
+    // Step 3: Broadcast
+    console.log('📤 Step 3: Broadcasting...');
+    const broadcastResult = await broadcastDummyUtxoTransaction(
+      signResult.signed_psbt,
+      networkType
+    );
+
+    console.log('✅ Dummy UTXO creation completed!');
+
+    return {
+      generation: generateResult.metadata,
+      signing: {
+        wallet_type: 'simulated', // In production, this would be the actual wallet type
+        signed_at: new Date().toISOString()
+      },
+      broadcast: broadcastResult,
+      status: 'completed',
+      next_steps: [
+        `Wait for transaction confirmation: ${broadcastResult.txid}`,
+        'Check status using /transaction-status endpoint',
+        'After 1 confirmation, you can proceed with ordinal purchases'
+      ]
+    };
+
+  } catch (error) {
+    console.error('❌ Complete dummy UTXO creation failed:', error);
+    throw new AppError(`Complete dummy UTXO creation failed: ${error.message}`, 500);
+  }
+};
+
+/**
+ * Get transaction status for dummy UTXO
+ * Body: {
+ *   txid: string,
+ *   network?: 'testnet' | 'mainnet'
+ * }
+ */
+export const getDummyUtxoTransactionStatus = async (txid, networkType = 'testnet') => {
+  try {
+    const { baseMempoolApiUrl } = getNetworkConfig(networkType);
+
+    console.log(`🔍 Checking status for dummy UTXO transaction: ${txid}`);
+
+    const response = await fetch(`${baseMempoolApiUrl}/tx/${txid}/status`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return {
+          txid,
+          status: 'not_found',
+          confirmed: false,
+          message: 'Transaction not found in mempool. It may not be broadcasted yet.'
+        };
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const status = await response.json();
+
+    const isConfirmed = status.confirmed;
+    const confirmationMessage = isConfirmed 
+      ? `Confirmed at block ${status.block_height}`
+      : 'Waiting for confirmation';
+
+    return {
+      txid,
+      status: isConfirmed ? 'confirmed' : 'pending',
+      confirmed: isConfirmed,
+      block_height: status.block_height,
+      confirmations: status.block_height ? await getConfirmations(status.block_height, networkType) : 0,
+      timestamp: status.block_time,
+      message: confirmationMessage,
+      explorer_url: `${getNetworkConfig(networkType).baseMempoolUrl}/tx/${txid}`
+    };
+
+  } catch (error) {
+    console.error('❌ Transaction status check failed:', error);
+    throw new AppError(`Failed to check transaction status: ${error.message}`, 500);
+  }
+};
+
+// ============================================================================
+// INTERNAL HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Simulate wallet signing for dummy UTXO PSBT
+ * In production, replace with actual wallet integration
+ */
+const simulateDummyUtxoSigning = async (psbt, networkType) => {
+  console.log(`🔐 Simulating wallet signing for dummy UTXO...`);
+  
+  // This is a simulation - in real implementation, you would:
+  // 1. For Unisat: Use window.unisat.signPsbt() in frontend
+  // 2. For Hiro: Use Stacks Connect
+  // 3. For Xverse: Use their SDK
+  
+  // For backend testing, we'll just return the PSBT as-is
+  // In real scenario, this would be signed by the user's wallet
+  console.log('⚠️ NOTE: This is simulated signing. In production, use actual wallet integration.');
+  
+  return psbt.toBase64();
+};
+
+/**
+ * Get confirmation count
+ */
+const getConfirmations = async (blockHeight, networkType) => {
+  try {
+    const { baseMempoolApiUrl } = getNetworkConfig(networkType);
+    const response = await fetch(`${baseMempoolApiUrl}/blocks/tip/height`);
+    const currentHeight = await response.json();
+    return Math.max(0, currentHeight - blockHeight + 1);
+  } catch (error) {
+    return 0;
+  }
+};
+
 
 // ============================================================================
 // SELLER PSBT GENERATION (Your Existing Implementation)
@@ -892,6 +1355,7 @@ export const generateSellerPSBT = async (
   network
 ) => {
   try {
+    console.log(inscriptionId,inscriptionOutput,priceInput,sellerAddress,paymentAddress,network)
     setNetwork(network);
     const networkInfo = getNetworkInfo();
     console.log("🔄 Generating Seller PSBT...");
@@ -951,6 +1415,7 @@ export const generateSellerPSBT = async (
     
     try {
       transaction = bitcoin.Transaction.fromHex(txHex);
+      console.log("transaction",transaction)
     } catch (error) {
       throw new AppError(`Invalid transaction hex: ${error.message}`, 400);
     }
@@ -1164,64 +1629,40 @@ export const generateSellerPSBTSimple = async (
   }
 };
 
+ 
 // ============================================================================
-// BUYER PSBT GENERATION (Claude's Implementation - Complete)
-// ============================================================================
-
 /**
  * Generate Buyer PSBT for purchasing an ordinal
- * Based on OpenOrdex implementation but enhanced for server-side use
+ * Enhanced with robust PSBT parsing
  */
 export const generateBuyerPSBT = async (
   listing,
   buyerPaymentAddress,
   buyerReceiveAddress,
   networkType = 'testnet',
-  feeLevel = 'hourFee' // 'fastestFee', 'halfHourFee', 'hourFee', 'economyFee'
+  feeLevel = 'hourFee'
 ) => {
   try {
     console.log('🔄 Generating Buyer PSBT...');
-    console.log('Network:', networkType);
-    console.log('Buyer Payment Address:', buyerPaymentAddress);
-    console.log('Buyer Receive Address:', buyerReceiveAddress);
-    console.log('Price:', listing.price_sats, 'sats');
     
-    // Set network
-    const network = networkType === 'testnet' 
-      ? bitcoin.networks.testnet 
-      : bitcoin.networks.bitcoin;
+    const { network, baseMempoolApiUrl } = getNetworkConfig(networkType);
     
     // ✅ STEP 1: Validate addresses
     console.log('✅ Step 1: Validating addresses...');
     
-    // Payment address can be any type
-    try {
-      bitcoin.address.toOutputScript(buyerPaymentAddress, network);
-    } catch (error) {
-      throw new AppError('Invalid buyer payment address', 400);
+    // Validate payment address
+    const paymentValidation = validateAddress(buyerPaymentAddress, networkType);
+    if (!paymentValidation.isValid) {
+      throw new AppError(`Invalid buyer payment address: ${paymentValidation.error}`, 400);
     }
     
-    // Receive address MUST be Taproot for ordinals
-    try {
-      const receiveScript = bitcoin.address.toOutputScript(buyerReceiveAddress, network);
-      const decoded = bitcoin.address.fromBech32(buyerReceiveAddress);
-      
-      if (decoded.version !== 1) {
-        throw new AppError(
-          'Ordinal receive address must be Taproot (P2TR). ' +
-          `Expected address starting with ${networkType === 'testnet' ? 'tb1p' : 'bc1p'}`,
-          400
-        );
-      }
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError('Invalid ordinal receive address', 400);
-    }
+    // Validate receive address MUST be Taproot for ordinals
+    validateOrdinalAddress(buyerReceiveAddress, networkType);
     
     // ✅ STEP 2: Get fee rates
     console.log('✅ Step 2: Fetching fee rates...');
     const feeRates = await getRecommendedFeeRates(networkType);
-    const selectedFeeRate = feeRates[feeLevel] || feeRates.hourFee;
+    const selectedFeeRate = feeRates[feeLevel];
     console.log(`Selected fee rate (${feeLevel}):`, selectedFeeRate, 'sats/vbyte');
     
     // ✅ STEP 3: Fetch buyer's UTXOs
@@ -1232,98 +1673,144 @@ export const generateBuyerPSBT = async (
       throw new AppError('No UTXOs found for buyer address', 400);
     }
     
-    // ✅ STEP 4: Find or require dummy UTXO
-    console.log('✅ Step 4: Finding dummy UTXO...');
-    const dummyUtxo = await findDummyUtxo(allBuyerUtxos, networkType);
+    // ✅ STEP 4: Check for existing dummy UTXO (optional)
+    console.log('✅ Step 4: Checking for existing dummy UTXO...');
+    const existingDummyUtxo = await findDummyUtxo(allBuyerUtxos, networkType);
     
-    if (!dummyUtxo) {
-      throw new AppError(
-        `No dummy UTXO found. Please create a ${DUMMY_UTXO_VALUE} sats UTXO first.`,
-        400
-      );
+    let requiresNewDummyUtxo = !existingDummyUtxo;
+    
+    if (existingDummyUtxo) {
+      console.log(`✅ Found existing dummy UTXO: ${existingDummyUtxo.txid}:${existingDummyUtxo.vout} (${existingDummyUtxo.value} sats)`);
+    } else {
+      console.log(`⚠️ No existing dummy UTXO found. Will create one in this transaction.`);
     }
     
-    // ✅ STEP 5: Parse seller's signed PSBT
+    // ✅ STEP 5: Parse seller's signed PSBT (ROBUST PARSING)
     console.log('✅ Step 5: Parsing seller PSBT...');
-    const sellerPsbt = bitcoin.Psbt.fromBase64(listing.signed_psbt, { network });
     
-    // Validate seller PSBT
-    if (sellerPsbt.txInputs.length !== 1 || sellerPsbt.txOutputs.length !== 1) {
-      throw new AppError('Invalid seller PSBT structure', 400);
+    // Use robust parser to handle any format
+    const sellerPSBTData = normalizeSellerPSBT(listing);
+    const sellerPsbt = sellerPSBTData.psbt;
+    
+    console.log(`📊 Seller PSBT format: ${sellerPSBTData.format}`);
+    console.log(`🔗 Seller PSBT input: ${sellerPSBTData.input}`);
+    console.log(`💰 Seller PSBT output value: ${sellerPSBTData.output.value} sats`);
+    
+    // Debug seller PSBT signatures
+    console.log('🔍 Checking seller PSBT signatures...');
+    const sellerInputData = sellerPsbt.data.inputs[0];
+    console.log('  Seller signature data:', {
+      hasTapKeySig: !!sellerInputData.tapKeySig,
+      hasTapScriptSig: !!sellerInputData.tapScriptSig,
+      hasPartialSig: !!sellerInputData.partialSig,
+      partialSigCount: sellerInputData.partialSig ? sellerInputData.partialSig.length : 0,
+      sighashType: sellerInputData.sighashType
+    });
+    
+    // ✅ STEP 6: Calculate required amount and select UTXOs
+    console.log('✅ Step 6: Calculating required amount...');
+    
+    // Calculate required amount
+    let requiredAmount = listing.price_sats;
+    
+    // If we need to create a new dummy UTXO, add its cost
+    if (requiresNewDummyUtxo) {
+      requiredAmount += DUMMY_UTXO_VALUE;
+      console.log(`➕ Adding ${DUMMY_UTXO_VALUE} sats for new dummy UTXO creation`);
     }
     
-    const sellerInput = sellerPsbt.txInputs[0];
-    const sellerOutput = sellerPsbt.txOutputs[0];
+    // Estimate fee based on transaction structure
+    const baseVins = 1 + (requiresNewDummyUtxo ? 0 : 1); // seller input + (existing dummy if available)
+    const baseVouts = 2 + (requiresNewDummyUtxo ? 1 : 0); // ordinal + payment + (new dummy if needed)
     
-    // ✅ STEP 6: Estimate required amount and select UTXOs
-    console.log('✅ Step 6: Selecting payment UTXOs...');
+    const estimatedFee = calculateFee(
+      baseVins + 2, // base inputs + estimated payment UTXOs
+      baseVouts + 1, // base outputs + change
+      selectedFeeRate,
+      true
+    );
     
-    // Estimate transaction size
-    const estimatedInputs = [
-      { type: 'p2wpkh' }, // dummy UTXO
-      { type: 'p2tr' },   // seller's ordinal
-      { type: 'p2wpkh' }, // payment UTXO (assume SegWit)
-      { type: 'p2wpkh' }  // additional payment UTXO (buffer)
-    ];
+    console.log(`💰 Required amount: ${requiredAmount} sats + ${estimatedFee} sats fee`);
     
-    const estimatedOutputs = [
-      { type: 'p2tr' },   // ordinal to buyer
-      { type: sellerOutput.script[0] === 0x51 ? 'p2tr' : 'p2wpkh' }, // payment to seller
-      { type: 'p2wpkh' }, // new dummy UTXO
-      { type: 'p2wpkh' }  // change
-    ];
-    
-    const estimatedVSize = estimateTransactionVSize(estimatedInputs, estimatedOutputs);
-    const estimatedFee = calculateTransactionFee(estimatedVSize, selectedFeeRate);
-    
-    console.log(`📏 Estimated vSize: ${estimatedVSize} vbytes`);
-    console.log(`💰 Estimated fee: ${estimatedFee} sats`);
-    
-    // Required amount: price + new dummy UTXO + fees + buffer
-    const requiredAmount = listing.price_sats + DUMMY_UTXO_VALUE + estimatedFee;
-    
+    // Select payment UTXOs
     const { utxos: paymentUtxos, totalValue: totalPaymentValue } = await selectPaymentUtxos(
       allBuyerUtxos,
-      requiredAmount,
-      estimatedFee * 2, // Extra buffer for fee variations
+      requiredAmount + estimatedFee,
+      estimatedFee,
       networkType
     );
     
-    // ✅ STEP 7: Build the PSBT
+    // ✅ STEP 7: Build the PSBT (FIRST BUILD COMPLETE PSBT, THEN ADD SIGNATURES)
     console.log('✅ Step 7: Building buyer PSBT...');
+    
+    // STEP 7A: First build the complete unsigned PSBT
+    console.log('  Step 7A: Building complete unsigned PSBT structure...');
     const psbt = new bitcoin.Psbt({ network });
     
-    // INPUT 1: Dummy UTXO (for ordinal transfer)
-    console.log('  Adding dummy UTXO input...');
-    const dummyTxHex = await getTransactionHex(dummyUtxo.txid, networkType);
-    const dummyTx = bitcoin.Transaction.fromHex(dummyTxHex);
+    let totalInputValue = 0;
     
+    // INPUT 1: Existing dummy UTXO (if available)
+    if (existingDummyUtxo) {
+      console.log('  Adding existing dummy UTXO input...');
+      const dummyTxHex = await getTransactionHex(existingDummyUtxo.txid, networkType);
+      const dummyTx = bitcoin.Transaction.fromHex(dummyTxHex);
+      
+      // Clear witnesses for compatibility
+      for (const output in dummyTx.outs) {
+        try { dummyTx.setWitness(parseInt(output), []); } catch { }
+      }
+      
+      psbt.addInput({
+        hash: existingDummyUtxo.txid,
+        index: existingDummyUtxo.vout,
+        nonWitnessUtxo: dummyTx.toBuffer(),
+        witnessUtxo: dummyTx.outs[existingDummyUtxo.vout]
+      });
+      
+      totalInputValue += existingDummyUtxo.value;
+    }
+    
+    // INPUT 2: Seller's ordinal input (ADD UNSIGNED FIRST)
+    console.log('  Adding seller ordinal input (unsigned)...');
+    
+    // Extract the input information from seller PSBT
+    const sellerInput = sellerPsbt.data.globalMap.unsignedTx.tx.ins[0];
+    
+    // Get the transaction hex for the seller's input
+    const sellerInputTxHex = await getTransactionHex(sellerInput.hash.reverse().toString('hex'), networkType);
+    const sellerInputTx = bitcoin.Transaction.fromHex(sellerInputTxHex);
+    
+    // Add the input WITHOUT signatures first
     psbt.addInput({
-      hash: dummyUtxo.txid,
-      index: dummyUtxo.vout,
-      nonWitnessUtxo: dummyTx.toBuffer(),
-      witnessUtxo: dummyTx.outs[dummyUtxo.vout]
+      hash: sellerInput.hash.reverse().toString('hex'),
+      index: sellerInput.index,
+      nonWitnessUtxo: sellerInputTx.toBuffer(),
+      witnessUtxo: sellerInputTx.outs[sellerInput.index],
+      sighashType: sellerInputData.sighashType
     });
     
-    // OUTPUT 1: Ordinal to buyer (dummy value + inscription value)
+    const inscriptionValue = sellerInputData.witnessUtxo?.value || sellerPSBTData.output.value || 546;
+    
+    // OUTPUT 1: Ordinal to buyer
     console.log('  Adding ordinal output...');
-    const inscriptionValue = sellerPsbt.data.inputs[0].witnessUtxo?.value || 546;
-    psbt.addOutput({
-      address: buyerReceiveAddress,
-      value: dummyUtxo.value + inscriptionValue
-    });
-    
-    // INPUT 2: Seller's signed ordinal input (from seller PSBT)
-    console.log('  Adding seller ordinal input...');
-    psbt.addInput({
-      ...sellerPsbt.data.globalMap.unsignedTx.tx.ins[0],
-      ...sellerPsbt.data.inputs[0]
-    });
+    if (existingDummyUtxo) {
+      // Use existing dummy UTXO value + inscription value
+      psbt.addOutput({
+        address: buyerReceiveAddress,
+        value: existingDummyUtxo.value + inscriptionValue
+      });
+    } else {
+      // Create new ordinal output with just inscription value
+      psbt.addOutput({
+        address: buyerReceiveAddress,
+        value: inscriptionValue
+      });
+    }
     
     // OUTPUT 2: Payment to seller (from seller PSBT)
     console.log('  Adding payment to seller...');
     psbt.addOutput({
-      ...sellerPsbt.data.globalMap.unsignedTx.tx.outs[0]
+      ...sellerPSBTData.output
     });
     
     // INPUTS 3+: Payment UTXOs from buyer
@@ -1332,54 +1819,56 @@ export const generateBuyerPSBT = async (
       const txHex = await getTransactionHex(utxo.txid, networkType);
       const tx = bitcoin.Transaction.fromHex(txHex);
       
+      // Clear witnesses for compatibility
+      for (const output in tx.outs) {
+        try { tx.setWitness(parseInt(output), []); } catch { }
+      }
+      
       psbt.addInput({
         hash: utxo.txid,
         index: utxo.vout,
         nonWitnessUtxo: tx.toBuffer(),
         witnessUtxo: tx.outs[utxo.vout]
       });
+      
+      totalInputValue += utxo.value;
     }
     
-    // OUTPUT 3: New dummy UTXO for future purchases
-    console.log('  Adding new dummy UTXO output...');
+    // OUTPUT 3: Dummy UTXO (always needed for future purchases)
+    console.log('  Adding dummy UTXO output...');
     psbt.addOutput({
       address: buyerPaymentAddress,
       value: DUMMY_UTXO_VALUE
     });
     
-    // Calculate actual fee with real input/output counts
-    const actualInputs = [
-      { type: 'p2wpkh' }, // dummy
-      { type: 'p2tr' },   // ordinal
-      ...paymentUtxos.map(() => ({ type: 'p2wpkh' }))
-    ];
+    // Calculate total output value
+    let totalOutputValue = 
+      (existingDummyUtxo ? existingDummyUtxo.value + inscriptionValue : inscriptionValue) + // ordinal output
+      listing.price_sats +                    // payment to seller
+      DUMMY_UTXO_VALUE;                       // dummy UTXO (always needed)
     
-    const actualOutputs = [
-      { type: 'p2tr' },   // ordinal to buyer
-      { type: 'p2wpkh' }, // payment to seller
-      { type: 'p2wpkh' }, // new dummy
-      { type: 'p2wpkh' }  // change
-    ];
+    // Calculate actual fee
+    const actualVins = psbt.txInputs.length;
+    const actualVouts = psbt.txOutputs.length;
+    const actualFee = calculateFee(actualVins, actualVouts, selectedFeeRate, true);
     
-    const actualVSize = estimateTransactionVSize(actualInputs, actualOutputs);
-    const actualFee = calculateTransactionFee(actualVSize, selectedFeeRate);
-    
-    console.log(`📏 Actual vSize: ${actualVSize} vbytes`);
+    console.log(`📏 Actual vins: ${actualVins}, vouts: ${actualVouts}`);
     console.log(`💰 Actual fee: ${actualFee} sats`);
     
     // OUTPUT 4: Change back to buyer
-    const totalInputValue = dummyUtxo.value + totalPaymentValue;
-    const totalOutputValue = 
-      (dummyUtxo.value + inscriptionValue) + // ordinal output
-      listing.price_sats +                    // payment to seller
-      DUMMY_UTXO_VALUE;                       // new dummy UTXO
-    
     const changeValue = totalInputValue - totalOutputValue - actualFee;
     
     if (changeValue < 0) {
+      const missingAmount = Math.abs(changeValue);
       throw new AppError(
-        `Insufficient funds. Need ${Math.abs(changeValue)} more sats. ` +
-        `Total required: ${totalOutputValue + actualFee} sats, Available: ${totalInputValue} sats`,
+        `Insufficient funds. Need ${missingAmount} more sats.\n\n` +
+        `Breakdown:\n` +
+        `• Listing price: ${listing.price_sats} sats\n` +
+        `• Dummy UTXO: ${DUMMY_UTXO_VALUE} sats\n` +
+        `• Transaction fee: ${actualFee} sats\n` +
+        `• Total required: ${totalOutputValue + actualFee} sats\n` +
+        `• Available: ${totalInputValue} sats\n` +
+        `• Missing: ${missingAmount} sats`,
         400
       );
     }
@@ -1392,9 +1881,66 @@ export const generateBuyerPSBT = async (
       });
     } else {
       console.log(`  Change too small (${changeValue} sats), adding to fee`);
+      // Adjust fee to include the small change
+      totalOutputValue += changeValue;
+    }
+    
+    // STEP 7B: Now copy seller signatures to the appropriate input
+    console.log('  Step 7B: Copying seller signatures to PSBT...');
+    
+    // Determine which input index corresponds to the seller's ordinal
+    // This depends on whether we added a dummy UTXO input first
+    const sellerInputIndex = existingDummyUtxo ? 0 : 0; // Adjust based on your input order
+    
+    console.log(`  Copying seller signatures to input index: ${sellerInputIndex}`);
+    
+    // Copy all signature data to the specific input
+    if (sellerInputData.tapKeySig) {
+      psbt.data.inputs[sellerInputIndex].tapKeySig = sellerInputData.tapKeySig;
+      console.log('  ✅ Added seller Taproot signature (tapKeySig)');
+    }
+    
+    if (sellerInputData.tapScriptSig) {
+      psbt.data.inputs[sellerInputIndex].tapScriptSig = sellerInputData.tapScriptSig;
+      console.log('  ✅ Added seller Tapscript signatures');
+    }
+    
+    if (sellerInputData.partialSig) {
+      psbt.data.inputs[sellerInputIndex].partialSig = sellerInputData.partialSig;
+      console.log(`  ✅ Added seller partial signatures (${sellerInputData.partialSig.length})`);
+    }
+    
+    if (sellerInputData.tapLeafScript) {
+      psbt.data.inputs[sellerInputIndex].tapLeafScript = sellerInputData.tapLeafScript;
+      console.log('  ✅ Added seller tapLeafScript');
+    }
+    
+    if (sellerInputData.tapInternalKey) {
+      psbt.data.inputs[sellerInputIndex].tapInternalKey = sellerInputData.tapInternalKey;
+      console.log('  ✅ Added seller tapInternalKey');
+    }
+    
+    if (sellerInputData.tapMerkleRoot) {
+      psbt.data.inputs[sellerInputIndex].tapMerkleRoot = sellerInputData.tapMerkleRoot;
+      console.log('  ✅ Added seller tapMerkleRoot');
+    }
+    
+    // 🔍 DEBUG: Verify signatures in final PSBT
+    console.log('🔍 Verifying signatures in final buyer PSBT...');
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.data.inputs[i];
+      const hasSig = input.tapKeySig || input.tapScriptSig || (input.partialSig && input.partialSig.length > 0);
+      console.log(`  Input ${i}: ${hasSig ? '✅ SIGNED' : '❌ UNSIGNED'}`, {
+        tapKeySig: !!input.tapKeySig,
+        tapScriptSig: !!input.tapScriptSig,
+        partialSig: input.partialSig ? input.partialSig.length : 0
+      });
     }
     
     const psbtBase64 = psbt.toBase64();
+    
+    // Get Bitcoin price for USD conversion
+    const btcPrice = await getBitcoinPrice();
     
     console.log('✅ Buyer PSBT generated successfully!');
     console.log('📦 Summary:');
@@ -1405,6 +1951,9 @@ export const generateBuyerPSBT = async (
     console.log('  - Fee:', actualFee, 'sats');
     console.log('  - Change:', changeValue, 'sats');
     console.log('  - Fee Rate:', selectedFeeRate, 'sats/vbyte');
+    console.log('  - Dummy UTXO:', existingDummyUtxo ? 'Existing' : 'New');
+    console.log('  - Seller Signatures Included:', sellerInputData.tapKeySig ? 'Yes (Taproot)' : 
+                sellerInputData.partialSig ? 'Yes (Legacy)' : 'No');
     
     return {
       psbt: psbtBase64,
@@ -1415,9 +1964,16 @@ export const generateBuyerPSBT = async (
         totalInput: totalInputValue,
         totalOutput: totalOutputValue,
         changeAmount: changeValue,
-        vsize: actualVSize,
-        dummyUtxo: `${dummyUtxo.txid}:${dummyUtxo.vout}`,
-        paymentUtxosCount: paymentUtxos.length
+        vsize: actualVins * 180 + actualVouts * 34 + 10,
+        dummyUtxo: existingDummyUtxo ? `${existingDummyUtxo.txid}:${existingDummyUtxo.vout}` : 'new',
+        dummyUtxoStatus: existingDummyUtxo ? 'existing' : 'creating_new',
+        paymentUtxosCount: paymentUtxos.length,
+        usdPrice: (listing.price_sats / 100000000) * btcPrice,
+        btcPrice: btcPrice,
+        transactionType: existingDummyUtxo ? 'purchase_only' : 'purchase_with_dummy_creation',
+        sellerPsbtFormat: sellerPSBTData.format,
+        sellerSignaturesIncluded: !!sellerInputData.tapKeySig || !!sellerInputData.partialSig,
+        signatureStatus: `${sellerInputData.tapKeySig || sellerInputData.partialSig ? 1 : 0}/${psbt.inputCount} inputs pre-signed`
       }
     };
     
@@ -1429,6 +1985,7 @@ export const generateBuyerPSBT = async (
     throw new AppError(`Failed to generate buyer PSBT: ${error.message}`, 500);
   }
 };
+
  const detectScriptType = (script) => {
   const scriptHex = script.toString('hex');
   
@@ -1461,9 +2018,13 @@ export const generateDummyUtxoPSBT = async (
   try {
     console.log('🔄 Generating dummy UTXO creation PSBT...');
     
-    const network = networkType === 'testnet' 
-      ? bitcoin.networks.testnet 
-      : bitcoin.networks.bitcoin;
+    const { network, baseMempoolApiUrl } = getNetworkConfig(networkType);
+    
+    // Validate address
+    const addressValidation = validateAddress(payerAddress, networkType);
+    if (!addressValidation.isValid) {
+      throw new AppError(`Invalid payer address: ${addressValidation.error}`, 400);
+    }
     
     // Get fee rates
     const feeRates = await getRecommendedFeeRates(networkType);
@@ -1474,24 +2035,24 @@ export const generateDummyUtxoPSBT = async (
     // Fetch UTXOs
     const allUtxos = await fetchAddressUtxos(payerAddress, networkType);
     
-    // Detect address type for proper fee estimation
-    const addressType = getAddressType(payerAddress);
-    console.log(`📍 Address type detected: ${addressType}`);
+    if (allUtxos.length === 0) {
+      throw new AppError('No UTXOs found for address', 400);
+    }
     
-    // Estimate required amount with proper address type
+    // Calculate required amount
     const totalDummyValue = numberOfDummyUtxos * DUMMY_UTXO_VALUE;
     
-    // Use proper input/output types based on address
-    const estimatedVSize = estimateTransactionVSize(
-      [{ type: addressType }], // Input type based on payer's address
-      Array(numberOfDummyUtxos + 1).fill({ type: addressType }) // Outputs same type
+    // Estimate fee using OpenOrdex method
+    const estimatedFee = calculateFee(
+      allUtxos.length, // vins
+      numberOfDummyUtxos + 1, // vouts (dummy UTXOs + change)
+      selectedFeeRate,
+      true // include change
     );
-    
-    const estimatedFee = calculateTransactionFee(estimatedVSize, selectedFeeRate);
     
     console.log(`💰 Required: ${totalDummyValue} sats + ${estimatedFee} sats fee`);
     
-    // Select UTXOs with better debugging
+    // Select UTXOs with OpenOrdex method
     const { utxos, totalValue } = await selectPaymentUtxos(
       allUtxos,
       totalDummyValue + estimatedFee,
@@ -1499,33 +2060,27 @@ export const generateDummyUtxoPSBT = async (
       networkType
     );
     
-    // Build PSBT with proper address type handling
+    // Build PSBT (OpenOrdex approach)
     const psbt = new bitcoin.Psbt({ network });
     
-    // Add inputs with proper script detection
+    // Add inputs
     for (const utxo of utxos) {
       const txHex = await getTransactionHex(utxo.txid, networkType);
       const tx = bitcoin.Transaction.fromHex(txHex);
-      const output = tx.outs[utxo.vout];
       
-      // Determine the script type for this input
-      const inputType = detectScriptType(output.script);
-      
-      const inputData = {
-        hash: utxo.txid,
-        index: utxo.vout,
-        witnessUtxo: {
-          script: output.script,
-          value: utxo.value
-        }
-      };
-      
-      // Add nonWitnessUtxo for non-segwit inputs
-      if (inputType !== 'p2wpkh' && inputType !== 'p2wsh' && inputType !== 'p2tr') {
-        inputData.nonWitnessUtxo = tx.toBuffer();
+      // Clear witnesses for compatibility (OpenOrdex approach)
+      for (const output in tx.outs) {
+        try { 
+          tx.setWitness(parseInt(output), []); 
+        } catch { }
       }
       
-      psbt.addInput(inputData);
+      psbt.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
+        nonWitnessUtxo: tx.toBuffer(),
+        witnessUtxo: tx.outs[utxo.vout]
+      });
     }
     
     // Add dummy UTXO outputs
@@ -1536,8 +2091,10 @@ export const generateDummyUtxoPSBT = async (
       });
     }
     
-    // Add change output
+    // Calculate change
     const changeValue = totalValue - totalDummyValue - estimatedFee;
+    
+    // Add change output if above dust limit
     if (changeValue > 546) {
       psbt.addOutput({
         address: payerAddress,
@@ -1554,8 +2111,9 @@ export const generateDummyUtxoPSBT = async (
         totalDummyValue,
         fee: estimatedFee,
         changeValue,
-        addressType,
-        selectedUtxos: utxos.length
+        addressType: addressValidation.type,
+        selectedUtxos: utxos.length,
+        totalInput: totalValue
       }
     };
     
@@ -1564,7 +2122,6 @@ export const generateDummyUtxoPSBT = async (
     throw new AppError(`Failed to generate dummy UTXO PSBT: ${error.message}`, 500);
   }
 };
-
 // ============================================================================
 // PSBT SIGNING & VERIFICATION (Your Existing Implementation)
 // ============================================================================
@@ -1864,48 +2421,40 @@ export const verifySignedPSBTService = async (signedData, networkType = 'testnet
     let isFullySigned = false;
     let canFinalize = false;
     let finalizeError = null;
+if (isPSBT) {
+  console.log("📊 Analyzing PSBT...");
+  analysis = analyzePSBTInternal(psbt);
+  
+  // FIXED: Use the corrected analysis from analyzePSBTInternal
+  hasAnySignatures = analysis.signatureAnalysis.signedInputs > 0;
+  signatureCount = analysis.signatureAnalysis.totalSignatures;
+  isFullySigned = analysis.signatureAnalysis.signedInputs === analysis.signatureAnalysis.totalInputs;
+  
+  console.log(`📋 Signature Status: ${signatureCount} signatures across ${analysis.inputs.length} inputs`);
+  console.log(`🔐 Has any signatures: ${hasAnySignatures}`);
+  console.log(`✅ Fully signed: ${isFullySigned}`);
+  console.log(`🔷 Taproot detected: ${analysis.signatureAnalysis.taprootInputs > 0}`);
+  console.log(`📊 Signature breakdown:`, analysis.signatureAnalysis.signatureBreakdown);
 
-    if (isPSBT) {
-      console.log("📊 Analyzing PSBT...");
-      analysis = analyzePSBTInternal(psbt);
-      
-      // UPDATED: Check for both traditional and Taproot signatures
-      hasAnySignatures = analysis.inputs.some(input => 
-        input.hasPartialSig || input.hasTapKeySig || input.hasTapScriptSig
-      );
-      
-      signatureCount = analysis.inputs.reduce((count, input) => 
-        count + (input.partialSigCount || 0) + (input.tapKeySig ? 1 : 0) + (input.tapScriptSigCount || 0), 0
-      );
-      
-      isFullySigned = analysis.inputs.every(input => 
-        input.hasPartialSig || input.hasTapKeySig || input.hasTapScriptSig
-      );
-      
-      console.log(`📋 Signature Status: ${signatureCount} signatures across ${analysis.inputs.length} inputs`);
-      console.log(`🔐 Has any signatures: ${hasAnySignatures}`);
-      console.log(`✅ Fully signed: ${isFullySigned}`);
-      console.log(`🔷 Taproot detected: ${analysis.inputs.some(input => input.hasTapKeySig)}`);
-
-      // Finalization check
-      try {
-        let finalizablePsbt;
-        if (detectedFormat === 'PSBT (hex)') {
-          finalizablePsbt = bitcoin.Psbt.fromBuffer(Buffer.from(signedData, 'hex'), { network: currentNetwork });
-        } else {
-          finalizablePsbt = bitcoin.Psbt.fromBase64(signedData, { network: currentNetwork });
-        }
-        
-        finalizablePsbt.finalizeAllInputs();
-        finalTx = finalizablePsbt.extractTransaction();
-        canFinalize = true;
-        console.log("✅ PSBT finalized successfully");
-      } catch (finalizeErr) {
-        canFinalize = false;
-        finalizeError = finalizeErr.message;
-        console.log("⚠️ PSBT finalization failed:", finalizeErr.message);
-      }
+  // Finalization check
+  try {
+    let finalizablePsbt;
+    if (detectedFormat === 'PSBT (hex)') {
+      finalizablePsbt = bitcoin.Psbt.fromBuffer(Buffer.from(signedData, 'hex'), { network: currentNetwork });
+    } else {
+      finalizablePsbt = bitcoin.Psbt.fromBase64(signedData, { network: currentNetwork });
     }
+    
+    finalizablePsbt.finalizeAllInputs();
+    finalTx = finalizablePsbt.extractTransaction();
+    canFinalize = true;
+    console.log("✅ PSBT finalized successfully");
+  } catch (finalizeErr) {
+    canFinalize = false;
+    finalizeError = finalizeErr.message;
+    console.log("⚠️ PSBT finalization failed:", finalizeErr.message);
+  }
+}
 
     const verificationResult = {
       isPSBT,
@@ -1961,7 +2510,7 @@ export const verifySignedPSBTService = async (signedData, networkType = 'testnet
   }
 };
 
-// Updated analyzePSBTInternal to handle Taproot
+// FIXED analyzePSBTInternal function
 const analyzePSBTInternal = (psbt) => {
   const analysis = {
     version: psbt.version,
@@ -1985,10 +2534,24 @@ const analyzePSBTInternal = (psbt) => {
       const partialSigCount = inputData.partialSig ? inputData.partialSig.length : 0;
       const hasPartialSig = partialSigCount > 0;
 
-      // Check for Taproot signatures
+      // FIXED: Check for Taproot signatures
       const hasTapKeySig = !!inputData.tapKeySig;
-      const hasTapScriptSig = !!inputData.tapScriptSig && inputData.tapScriptSig.length > 0;
-      const tapScriptSigCount = inputData.tapScriptSig ? inputData.tapScriptSig.length : 0;
+      
+      // FIXED: tapScriptSig is an OBJECT, not an array!
+      const hasTapScriptSig = !!inputData.tapScriptSig && Object.keys(inputData.tapScriptSig).length > 0;
+      const tapScriptSigCount = inputData.tapScriptSig ? Object.keys(inputData.tapScriptSig).length : 0;
+
+      // FIXED: Calculate total signatures for this input
+      const totalSignaturesForInput = partialSigCount + (hasTapKeySig ? 1 : 0) + tapScriptSigCount;
+      const isInputSigned = hasPartialSig || hasTapKeySig || hasTapScriptSig;
+
+      console.log(`  Input ${index} signature analysis:`, {
+        traditional: partialSigCount,
+        tapKeySig: hasTapKeySig ? 1 : 0,
+        tapScriptSig: tapScriptSigCount,
+        total: totalSignaturesForInput,
+        signed: isInputSigned
+      });
 
       return {
         index,
@@ -2006,6 +2569,10 @@ const analyzePSBTInternal = (psbt) => {
         hasTapScriptSig,
         tapScriptSigCount,
         
+        // FIXED: Add calculated fields
+        totalSignatures: totalSignaturesForInput,
+        isSigned: isInputSigned,
+        
         hasFinalScript: !!(inputData.finalScriptSig || inputData.finalScriptWitness),
         sighashType: inputData.sighashType,
         
@@ -2016,12 +2583,8 @@ const analyzePSBTInternal = (psbt) => {
             signature: sig.signature.toString('hex').substring(0, 32) + '...'
           })) : [],
           taproot: {
-            tapKeySig: inputData.tapKeySig ? inputData.tapKeySig.toString('hex').substring(0, 32) + '...' : null,
-            tapScriptSig: inputData.tapScriptSig ? inputData.tapScriptSig.map(sig => ({
-              pubkey: sig.pubkey.toString('hex'),
-              leafHash: sig.leafHash.toString('hex'),
-              signature: sig.signature.toString('hex').substring(0, 32) + '...'
-            })) : []
+            tapKeySig: inputData.tapKeySig ? 'Present' : 'None',
+            tapScriptSigCount: tapScriptSigCount
           }
         }
       };
@@ -2040,35 +2603,35 @@ const analyzePSBTInternal = (psbt) => {
         value: output.value,
         script: output.script.toString('hex')
       };
-    }),
+    })
+  };
+  
+  // FIXED: Enhanced signature analysis
+  analysis.signatureAnalysis = {
+    totalInputs: psbt.txInputs.length,
+    signedInputs: analysis.inputs.filter(input => input.isSigned).length,
+    totalSignatures: analysis.inputs.reduce((count, input) => count + input.totalSignatures, 0),
+    taprootInputs: analysis.inputs.filter(input => input.hasTapKeySig || input.hasTapScriptSig).length,
+    legacyInputs: analysis.inputs.filter(input => input.hasPartialSig).length,
     
-    // Enhanced signature analysis
-    signatureAnalysis: {
-      totalInputs: psbt.txInputs.length,
-      signedInputs: psbt.data.inputs.filter(input => 
-        input.partialSig || input.tapKeySig || input.tapScriptSig
-      ).length,
-      totalSignatures: psbt.data.inputs.reduce((count, input) => 
-        count + 
-        (input.partialSig ? input.partialSig.length : 0) +
-        (input.tapKeySig ? 1 : 0) +
-        (input.tapScriptSig ? input.tapScriptSig.length : 0), 0
-      ),
-      taprootInputs: psbt.data.inputs.filter(input => input.tapKeySig || input.tapScriptSig).length,
-      legacyInputs: psbt.data.inputs.filter(input => input.partialSig).length
-    },
-    
-    isSigned: psbt.data.inputs.some(input => input.partialSig || input.tapKeySig || input.tapScriptSig),
-    canExtract: psbt.data.inputs.every(input => input.finalScriptSig || input.finalScriptWitness)
+    // FIXED: Detailed breakdown
+    signatureBreakdown: {
+      traditional: analysis.inputs.reduce((count, input) => count + input.partialSigCount, 0),
+      tapKey: analysis.inputs.filter(input => input.hasTapKeySig).length,
+      tapScript: analysis.inputs.reduce((count, input) => count + input.tapScriptSigCount, 0)
+    }
   };
   
   console.log(`📈 PSBT Analysis: ${analysis.signatureAnalysis.signedInputs}/${analysis.signatureAnalysis.totalInputs} inputs signed`);
   console.log(`🔢 Total signatures: ${analysis.signatureAnalysis.totalSignatures}`);
   console.log(`🎯 Taproot inputs: ${analysis.signatureAnalysis.taprootInputs}`);
   console.log(`🔷 Legacy inputs: ${analysis.signatureAnalysis.legacyInputs}`);
+  console.log(`📊 Signature breakdown:`, analysis.signatureAnalysis.signatureBreakdown);
   
   return analysis;
 };
+
+
 // Get wallet-specific signing instructions
 const getWalletSigningInstructions = (walletType) => {
   const instructions = {

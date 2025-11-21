@@ -14,6 +14,9 @@ import Ordinal from '../models/Ordinal.js';
 import Collection from '../models/Collection.js';
 import { AppError } from '../middleware/errorHandler.js';
 
+const DUMMY_UTXO_VALUE = 1000; // 1000 sats for dummy UTXO
+
+
 // ============================================================================
 // SELLER FLOW - Generate Unsigned PSBT
 // ============================================================================
@@ -30,7 +33,6 @@ export const generateSellerPSBT = async (req, res, next) => {
     } = req.body;
 
     console.log('📝 Step 1: Generating Seller PSBT...');
-
     // Validate required fields
     if (!inscription_id || !inscription_output || !price_sats || !seller_address) {
       throw new AppError('Missing required fields: inscription_id, inscription_output, price_sats, seller_address', 400);
@@ -297,7 +299,7 @@ export const generateBuyerPSBT = async (req, res, next) => {
       listing_id,
       buyer_payment_address,
       buyer_receive_address,
-      fee_level = 'hourFee', // 'fastestFee', 'halfHourFee', 'hourFee', 'economyFee'
+      fee_level = 'hourFee',
       network = 'testnet'
     } = req.body;
 
@@ -322,6 +324,7 @@ export const generateBuyerPSBT = async (req, res, next) => {
     if (listing.status !== 'active') {
       throw new AppError(`Listing is ${listing.status}. Only active listings can be purchased.`, 400);
     }
+    console.log('✅ Listing found:', listing);
 
     console.log('✅ Listing found:', listing.inscription_id);
 
@@ -332,7 +335,7 @@ export const generateBuyerPSBT = async (req, res, next) => {
     }
 
     // ✅ STEP 3: Generate buyer PSBT
-    console.log('🔧 Step 2: Generating buyer PSBT...');
+    console.log('🔧 Step 3: Generating buyer PSBT...');
     const result = await generateBuyerPSBTService(
       listing,
       buyer_payment_address,
@@ -343,9 +346,14 @@ export const generateBuyerPSBT = async (req, res, next) => {
 
     console.log('✅ Buyer PSBT generated successfully!');
 
+    // Dynamic message based on dummy UTXO status
+    const dummyUtxoMessage = result.metadata.dummyUtxoStatus === 'existing' 
+      ? 'Using existing dummy UTXO.' 
+      : 'Creating new dummy UTXO as part of this transaction.';
+
     res.json({
       success: true,
-      message: 'Buyer PSBT generated successfully. Please sign and broadcast this transaction.',
+      message: `Buyer PSBT generated successfully. ${dummyUtxoMessage}`,
       data: {
         unsigned_psbt: result.psbt,
         metadata: result.metadata,
@@ -359,19 +367,24 @@ export const generateBuyerPSBT = async (req, res, next) => {
           ordinal: listing.ordinal
         },
         transaction_details: {
-          total_cost_sats: listing.price_sats + result.metadata.estimatedFee,
-          total_cost_btc: (listing.price_sats + result.metadata.estimatedFee) / 100000000,
+          total_cost_sats: listing.price_sats + result.metadata.estimatedFee + 
+                          (result.metadata.dummyUtxoStatus === 'creating_new' ? DUMMY_UTXO_VALUE : 0),
+          total_cost_btc: (listing.price_sats + result.metadata.estimatedFee + 
+                          (result.metadata.dummyUtxoStatus === 'creating_new' ? DUMMY_UTXO_VALUE : 0)) / 100000000,
           price_sats: listing.price_sats,
           fee_sats: result.metadata.estimatedFee,
           fee_rate: result.metadata.feeRate,
-          change_sats: result.metadata.changeAmount
+          change_sats: result.metadata.changeAmount,
+          dummy_utxo_included: result.metadata.dummyUtxoStatus === 'creating_new'
         },
         next_steps: [
           '1. Sign this PSBT using your Bitcoin wallet',
           '2. Broadcast the signed transaction to the network',
           '3. Wait for confirmation',
           '4. The ordinal will be transferred to your receive address'
-        ],
+        ].concat(result.metadata.dummyUtxoStatus === 'creating_new' ? 
+          ['5. A new dummy UTXO will be created for future purchases'] : 
+          ['5. Your existing dummy UTXO will be recreated for future purchases']),
         warnings: [
           'Ensure your receive address is a Taproot address (starts with bc1p or tb1p)',
           'Double-check the transaction details before signing',
@@ -380,26 +393,31 @@ export const generateBuyerPSBT = async (req, res, next) => {
       }
     });
   } catch (error) {
-    // Provide helpful error messages for common issues
-    if (error.message.includes('No dummy UTXO found')) {
+    // Enhanced error handling
+    if (error.message.includes('Invalid PSBT format') || error.message.includes('Invalid Magic Number')) {
       return res.status(400).json({
         success: false,
-        error: 'No dummy UTXO found',
-        message: 'You need to create a dummy UTXO before buying. Use the /api/psbt/generate-dummy-utxo endpoint first.',
+        error: 'Invalid seller PSBT format',
+        message: 'The seller PSBT in this listing appears to be corrupted or in an unsupported format.',
         help: {
-          what_is_dummy_utxo: 'A dummy UTXO is a small 1000 sats UTXO used to facilitate ordinal transfers.',
-          how_to_create: 'Send 1000 sats to your own address, or use our dummy UTXO creation endpoint.'
+          issue: 'Seller PSBT format error',
+          possible_causes: [
+            'PSBT stored as hex instead of base64',
+            'PSBT data is corrupted',
+            'Data is actually a raw transaction'
+          ],
+          solution: 'The seller may need to recreate the listing with a valid PSBT'
         }
       });
     }
     
-    if (error.message.includes('Insufficient')) {
+    if (error.message.includes('Insufficient funds')) {
       return res.status(400).json({
         success: false,
         error: 'Insufficient funds',
         message: error.message,
         help: {
-          what_you_need: 'Price + Fees + Dummy UTXO (1000 sats)',
+          what_you_need: 'Price + Fees' + (error.message.includes('Dummy UTXO') ? ' + Dummy UTXO (1000 sats)' : ''),
           check_balance: 'Make sure you have enough BTC in your payment address'
         }
       });
@@ -602,8 +620,10 @@ export const verifySignedPSBT = async (req, res, next) => {
 // ============================================================================
 // TRANSACTION BROADCASTING
 // ============================================================================
-
 export const broadcastTransaction = async (req, res, next) => {
+  let txId = null;
+  let txHex = null;
+  
   try {
     const { signed_psbt, network = 'testnet' } = req.body;
 
@@ -612,6 +632,9 @@ export const broadcastTransaction = async (req, res, next) => {
     }
 
     console.log('📡 Broadcasting transaction...');
+    console.log('🌐 Network:', network);
+    console.log('📦 PSBT length:', signed_psbt.length);
+    console.log('🔍 PSBT format:', signed_psbt.startsWith('70736274') ? 'HEX' : 'BASE64');
 
     // Import bitcoinjs-lib dynamically
     const bitcoin = await import('bitcoinjs-lib');
@@ -622,50 +645,330 @@ export const broadcastTransaction = async (req, res, next) => {
     // Parse PSBT
     let psbt;
     try {
-      // Try hex first (from Unisat)
+      console.log('🔄 Parsing PSBT...');
       if (signed_psbt.startsWith('70736274')) {
         psbt = bitcoin.Psbt.fromHex(signed_psbt, { network: networkConfig });
+        console.log('✅ PSBT parsed as HEX');
       } else {
         psbt = bitcoin.Psbt.fromBase64(signed_psbt, { network: networkConfig });
+        console.log('✅ PSBT parsed as BASE64');
       }
     } catch (error) {
-      throw new AppError('Invalid PSBT format', 400);
+      console.error('❌ PSBT parsing failed:', error.message);
+      throw new AppError(`Invalid PSBT format: ${error.message}`, 400);
     }
-    
+
+    // 🔍 DEBUG: Analyze PSBT before finalization
+    console.log('\n🔍 PSBT ANALYSIS BEFORE FINALIZATION:');
+    console.log('📊 PSBT Version:', psbt.version);
+    console.log('🔢 Input Count:', psbt.inputCount);
+    console.log('📤 Output Count:', psbt.txOutputs.length);
+    console.log('⏰ Locktime:', psbt.locktime);
+
+    // Analyze each input
+    console.log('\n📋 INPUT ANALYSIS:');
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.txInputs[i];
+      const inputData = psbt.data.inputs[i];
+      
+      const txid = input.hash.reverse().toString('hex');
+      const txid1 = input.hash.toString('hex');
+      console.log(txid1);
+      const vout = input.index;
+      
+      console.log(`  Input ${i}:`);
+      console.log(`    TXID: ${txid}`);
+      console.log(`    VOUT: ${vout}`);
+      console.log(`    Sequence: ${input.sequence}`);
+      
+      // Signature analysis
+      const hasTraditionalSig = inputData.partialSig && inputData.partialSig.length > 0;
+      const hasTaprootSig = !!inputData.tapKeySig;
+      const hasTapScriptSig = inputData.tapScriptSig && Object.keys(inputData.tapScriptSig).length > 0;
+      const traditionalSigCount = hasTraditionalSig ? inputData.partialSig.length : 0;
+      const tapScriptSigCount = hasTapScriptSig ? Object.keys(inputData.tapScriptSig).length : 0;
+      const totalSigCount = traditionalSigCount + (hasTaprootSig ? 1 : 0) + tapScriptSigCount;
+      
+      console.log(`    Signatures:`, {
+        traditional: hasTraditionalSig,
+        traditionalCount: traditionalSigCount,
+        taproot: hasTaprootSig,
+        tapscript: hasTapScriptSig,
+        tapscriptCount: tapScriptSigCount,
+        total: totalSigCount
+      });
+      
+      // UTXO data
+      console.log(`    UTXO Data:`, {
+        witnessUtxo: !!inputData.witnessUtxo,
+        nonWitnessUtxo: !!inputData.nonWitnessUtxo,
+        value: inputData.witnessUtxo ? inputData.witnessUtxo.value + ' sats' : 'unknown'
+      });
+      
+      // Finalization status
+      console.log(`    Finalization:`, {
+        finalScriptSig: !!inputData.finalScriptSig,
+        finalScriptWitness: !!inputData.finalScriptWitness
+      });
+    }
+
+    // Analyze outputs
+    console.log('\n📤 OUTPUT ANALYSIS:');
+    psbt.txOutputs.forEach((output, i) => {
+      try {
+        const address = bitcoin.address.fromOutputScript(output.script, networkConfig);
+        console.log(`  Output ${i}: ${address} - ${output.value} sats`);
+      } catch (e) {
+        console.log(`  Output ${i}: Unknown script - ${output.value} sats`);
+      }
+    });
+
     // Finalize all inputs
+    console.log('\n🔧 FINALIZING INPUTS:');
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       try {
+        console.log(`  Finalizing input ${i}...`);
         psbt.finalizeInput(i);
+        console.log(`  ✅ Input ${i} finalized successfully`);
       } catch (e) {
-        console.log(`Input ${i} already finalized or doesn't need finalization`);
+        console.log(`  ⚠️ Input ${i} finalization: ${e.message}`);
       }
     }
 
     // Extract transaction
+    console.log('\n📄 EXTRACTING TRANSACTION...');
     const tx = psbt.extractTransaction();
-    const txHex = tx.toHex();
-    const txId = tx.getId();
+    txHex = tx.toHex();
+    txId = tx.getId();
 
-    // Broadcast
+    console.log('✅ Transaction extracted successfully!');
+    console.log('📄 Transaction ID:', txId);
+    console.log('📄 Transaction Size:', txHex.length / 2, 'bytes');
+    console.log('📄 Transaction Hex (first 200 chars):', txHex.substring(0, 200) + '...');
+
     const baseUrl = network === 'testnet'
       ? 'https://mempool.space/testnet/api'
       : 'https://mempool.space/api';
 
+    // 🔍 COMPREHENSIVE PRE-BROADCAST CHECKS
+    console.log('\n🔍 COMPREHENSIVE PRE-BROADCAST CHECKS:');
+
+    // 1. Check if transaction already exists
+    console.log('1. Checking if transaction already exists...');
+    try {
+      const txCheck = await fetch(`${baseUrl}/tx/${txId}`);
+      if (txCheck.ok) {
+        console.log(`❌ TRANSACTION ${txId} ALREADY EXISTS IN NETWORK!`);
+        
+        // Get detailed status
+        const txStatus = await fetch(`${baseUrl}/tx/${txId}/status`);
+        if (txStatus.ok) {
+          const status = await txStatus.json();
+          console.log('📊 Transaction status:', status);
+          
+          if (status.confirmed) {
+            throw new AppError(
+              `Transaction ${txId} is already CONFIRMED on blockchain! The trade completed successfully.`,
+              400
+            );
+          } else {
+            // Get more details about the unconfirmed transaction
+            const txDetails = await fetch(`${baseUrl}/tx/${txId}`);
+            if (txDetails.ok) {
+              const details = await txDetails.json();
+              console.log('📋 Transaction details:', {
+                status: details.status,
+                confirmations: details.status.confirmed ? details.confirmations : 0,
+                firstSeen: details.status.block_time || details.status.first_seen
+              });
+            }
+            
+            throw new AppError(
+              `Transaction ${txId} is already in mempool (unconfirmed). Wait for confirmation or try again later.`,
+              400
+            );
+          }
+        }
+        
+        throw new AppError(`Transaction ${txId} already exists in network`, 400);
+      } else {
+        console.log(`✅ Transaction ${txId} not found in network`);
+      }
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      console.log(`⚠️ Transaction existence check failed: ${error.message}`);
+    }
+
+    // 2. Check UTXO status and conflicts
+    console.log('2. Checking UTXO status and conflicts...');
+    let hasConflicts = false;
+    let conflictDetails = [];
+
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.txInputs[i];
+      const txid = input.hash.reverse().toString('hex');
+      const vout = input.index;
+      
+      console.log(`  Checking UTXO ${txid}:${vout}...`);
+      
+      try {
+        const response = await fetch(`${baseUrl}/tx/${txid}/outspend/${vout}`);
+        if (response.ok) {
+          const spendStatus = await response.json();
+          console.log(`  UTXO ${txid}:${vout}:`, {
+            spent: spendStatus.spent,
+            spendingTx: spendStatus.txid || 'none',
+            spendingIndex: spendStatus.vout || 'none'
+          });
+          
+          if (spendStatus.spent) {
+            if (spendStatus.txid === txId) {
+              console.log(`  ✅ UTXO is being spent by THIS transaction (expected)`);
+            } else {
+              console.log(`❌ CONFLICT: UTXO ${txid}:${vout} is being spent by ${spendStatus.txid}`);
+              hasConflicts = true;
+              conflictDetails.push({
+                utxo: `${txid}:${vout}`,
+                conflictingTx: spendStatus.txid
+              });
+
+              // Get info about conflicting transaction
+              try {
+                const conflictResponse = await fetch(`${baseUrl}/tx/${spendStatus.txid}`);
+                if (conflictResponse.ok) {
+                  const conflictTx = await conflictResponse.json();
+                  console.log(`  💡 Conflicting transaction details:`, {
+                    status: conflictTx.status?.confirmed ? 'confirmed' : 'unconfirmed',
+                    size: conflictTx.size,
+                    fee: conflictTx.fee,
+                    firstSeen: conflictTx.status?.first_seen
+                  });
+                }
+              } catch (conflictError) {
+                console.log(`  ⚠️ Could not get conflict details: ${conflictError.message}`);
+              }
+            }
+          } else {
+            console.log(`✅ UTXO ${txid}:${vout} is unspent and available`);
+          }
+        } else {
+          console.log(`⚠️ Could not fetch UTXO status: HTTP ${response.status}`);
+        }
+      } catch (error) {
+        console.log(`⚠️ UTXO ${txid}:${vout} check failed: ${error.message}`);
+      }
+    }
+
+    if (hasConflicts) {
+      const conflictMessage = conflictDetails.map(c => 
+        `UTXO ${c.utxo} is being spent by ${c.conflictingTx}`
+      ).join(', ');
+      
+      throw new AppError(
+        `Transaction conflicts detected: ${conflictMessage}. ` +
+        `Wait for conflicting transactions to confirm or be removed from mempool.`,
+        400
+      );
+    }
+
+    // 3. Check if UTXOs exist and are confirmed
+    console.log('3. Verifying UTXO existence and confirmation...');
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.txInputs[i];
+      const txid = input.hash.reverse().toString('hex');
+      
+      try {
+        const txResponse = await fetch(`${baseUrl}/tx/${txid}`);
+        if (!txResponse.ok) {
+          console.log(`❌ UTXO transaction ${txid} does not exist or is not found!`);
+          throw new AppError(
+            `UTXO transaction ${txid} does not exist on the blockchain. ` +
+            `Make sure you are on the correct network (${network}).`,
+            400
+          );
+        } else {
+          const txData = await txResponse.json();
+          console.log(`✅ UTXO ${txid} exists, status:`, {
+            confirmed: txData.status?.confirmed || false,
+            confirmations: txData.confirmations || 0,
+            blockHeight: txData.status?.block_height || 'unconfirmed'
+          });
+          
+          if (!txData.status?.confirmed) {
+            console.log(`⚠️ WARNING: UTXO ${txid} is unconfirmed`);
+          }
+        }
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        console.log(`⚠️ UTXO existence check failed: ${error.message}`);
+      }
+    }
+
+    console.log('✅ All pre-broadcast checks passed!');
+
+    // 🚀 BROADCAST TRANSACTION
+    console.log('\n🚀 BROADCASTING TRANSACTION...');
+    console.log('🌐 Broadcasting to:', baseUrl);
+    console.log('📤 Sending transaction hex...');
+
     const response = await fetch(`${baseUrl}/tx`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain'
+      },
       body: txHex
     });
 
+    console.log('📡 Broadcast response status:', response.status);
+    
     if (!response.ok) {
       const errorText = await response.text();
-      throw new AppError(`Broadcast failed: ${errorText}`, 500);
+      console.error('❌ BROADCAST FAILED!');
+      console.error('📋 Error response:', errorText);
+      
+      // Enhanced error parsing with specific solutions
+      let errorMessage = 'Broadcast failed';
+      let userFriendlyMessage = 'Transaction broadcast failed';
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.message) {
+          errorMessage = `Broadcast failed: ${errorJson.message}`;
+          
+          // Common error explanations and solutions
+          if (errorJson.message.includes('bad-txns-inputs-missingorspent')) {
+            userFriendlyMessage = 'The UTXOs you are trying to spend do not exist or have already been spent.';
+            console.log('💡 SOLUTION: Generate a new PSBT with fresh UTXOs');
+          } else if (errorJson.message.includes('insufficient fee')) {
+            userFriendlyMessage = 'The transaction fee is too low.';
+            console.log('💡 SOLUTION: Use a higher fee rate when generating the PSBT');
+          } else if (errorJson.message.includes('non-mandatory-script-verify-flag')) {
+            userFriendlyMessage = 'There is an issue with the transaction script or signatures.';
+            console.log('💡 SOLUTION: Check the PSBT construction and regenerate if needed');
+          } else if (errorJson.message.includes('txn-mempool-conflict')) {
+            userFriendlyMessage = 'This transaction conflicts with another transaction in the mempool.';
+            console.log('💡 SOLUTION: Wait for the conflicting transaction to clear');
+          } else if (errorJson.message.includes('already in block chain')) {
+            userFriendlyMessage = 'This transaction is already confirmed on the blockchain.';
+            console.log('💡 SOLUTION: The transaction was already successful!');
+          }
+        }
+      } catch (e) {
+        errorMessage = `Broadcast failed: ${errorText}`;
+      }
+      
+      throw new AppError(`${userFriendlyMessage} (${errorMessage})`, 500);
     }
 
-    console.log('✅ Transaction broadcast successfully!');
+    const broadcastResult = await response.text();
+    console.log('✅ BROADCAST SUCCESSFUL!');
+    console.log('📋 Broadcast result:', broadcastResult);
 
     const explorerUrl = network === 'testnet'
       ? `https://mempool.space/testnet/tx/${txId}`
       : `https://mempool.space/tx/${txId}`;
+
+    console.log('🔗 Explorer URL:', explorerUrl);
 
     res.json({
       success: true,
@@ -674,10 +977,46 @@ export const broadcastTransaction = async (req, res, next) => {
         txid: txId,
         tx_hex: txHex,
         explorer_url: explorerUrl,
-        network: network
+        network: network,
+        size: txHex.length / 2,
+        inputs: psbt.inputCount,
+        outputs: psbt.txOutputs.length,
+        confirmation_link: explorerUrl
       }
     });
+
   } catch (error) {
+    console.error('\n❌ FINAL BROADCAST ERROR:');
+    console.error('📋 Error message:', error.message);
+    console.error('📋 Error type:', error.constructor.name);
+    
+    if (txId) {
+      console.error('📋 Transaction ID:', txId);
+    }
+    
+    // Enhanced troubleshooting based on error type
+    if (error.message.includes('bad-txns-inputs-missingorspent')) {
+      console.error('\n💡 TROUBLESHOOTING - UTXO ISSUES:');
+      console.error('  1. Check if the UTXOs exist on the correct network');
+      console.error('  2. Verify no other transaction spent the same UTXOs');
+      console.error('  3. Generate a new PSBT with fresh UTXOs');
+      console.error('  4. Ensure wallet has sufficient balance');
+      console.error('  5. Wait for previous transactions to confirm');
+    } else if (error.message.includes('already exists')) {
+      console.error('\n💡 TROUBLESHOOTING - DUPLICATE TRANSACTION:');
+      console.error('  1. Check mempool for the transaction status');
+      console.error('  2. Wait for confirmation if already broadcast');
+      console.error('  3. If confirmed, the trade was successful!');
+      console.error('  4. Generate new listing if needed');
+    } else if (error.message.includes('conflict')) {
+      console.error('\n💡 TROUBLESHOOTING - TRANSACTION CONFLICTS:');
+      console.error('  1. Wait for conflicting transactions to clear from mempool');
+      console.error('  2. Use fresh UTXOs that are not involved in other transactions');
+      console.error('  3. Check wallet for pending transactions');
+    }
+    
+    console.error('📋 Full error stack:', error.stack);
+    
     next(error);
   }
 };
