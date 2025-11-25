@@ -8,7 +8,7 @@ import {
   generateSellerPSBTSimple as generateSellerPSBTSimpleService,
   decodePSBTData,
   generateDummyUtxoPSBT,
-  broadcastTransactionService
+  broadcastTransactionService,combinePSBTs
 } from '../services/psbtService.js';
 import { Listing } from '../models/Listing.js';
 import Ordinal from '../models/Ordinal.js';
@@ -683,6 +683,70 @@ export const generateSellerPSBTSimple = async (req, res, next) => {
       }
     });
   } catch (error) {
+    next(error);
+  }
+};
+export const combinePSBTController = async (req, res, next) => {
+  try {
+    console.log('📥 Combine PSBT Request Body:', JSON.stringify(req.body, null, 2));
+    
+    const { 
+      sellerSignedPsbt, 
+      buyerSignedPsbt, 
+      metadata, 
+      network = 'testnet' 
+    } = req.body;
+
+    // Validate required fields
+    if (!sellerSignedPsbt) {
+      throw new AppError('Missing sellerSignedPsbt in request body', 400);
+    }
+
+    if (!buyerSignedPsbt) {
+      throw new AppError('Missing buyerSignedPsbt in request body', 400);
+    }
+
+    if (!metadata) {
+      throw new AppError('Missing metadata in request body', 400);
+    }
+
+    // Validate metadata has required fields
+    if (!metadata.sellerInputTxid || metadata.sellerInputIndex === undefined) {
+      throw new AppError(
+        'Metadata must include sellerInputTxid and sellerInputIndex. ' +
+        'Please generate buyer PSBT first to get the complete metadata.',
+        400
+      );
+    }
+
+    if (!metadata.sellerUtxoValue) {
+      throw new AppError('Metadata must include sellerUtxoValue', 400);
+    }
+
+    console.log('✅ All required fields present');
+    console.log('📊 Metadata:', {
+      sellerInputTxid: metadata.sellerInputTxid,
+      sellerInputIndex: metadata.sellerInputIndex,
+      sellerUtxoValue: metadata.sellerUtxoValue,
+      priceSats: metadata.priceSats,
+      network: metadata.network
+    });
+
+    const result = await combinePSBTs(
+      sellerSignedPsbt,
+      buyerSignedPsbt,
+      metadata,
+      network
+    );
+
+    res.json({
+      success: true,
+      message: 'PSBTs combined successfully',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('❌ CONTROLLER ERROR:', error);
     next(error);
   }
 };

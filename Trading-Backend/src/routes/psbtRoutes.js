@@ -10,13 +10,11 @@ import {
   decodePSBT,
   signPSBTWithWallet,
   verifySignedPSBT,
-  broadcastTransaction
+  broadcastTransaction,combinePSBTController
 } from '../controllers/psbtController.js';
 import {
   signDummyUtxoPSBT,
-  broadcastDummyUtxoTransaction,
   getDummyUtxoTransactionStatus,
-  createDummyUtxoComplete
 } from '../services/psbtService.js';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -126,66 +124,6 @@ router.post('/sign-dummy-utxo', async (req, res, next) => {
 });
 
 /**
- * Broadcast dummy UTXO transaction
- * Body: { signed_psbt, network? }
- */
-router.post('/broadcast-dummy-utxo', async (req, res, next) => {
-  try {
-    const { signed_psbt, network = 'testnet' } = req.body;
-
-    if (!signed_psbt) {
-      throw new AppError('signed_psbt is required', 400);
-    }
-
-    const result = await broadcastDummyUtxoTransaction(signed_psbt, network);
-
-    res.json({
-      success: true,
-      message: 'Dummy UTXO transaction broadcasted successfully',
-      data: result
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * Complete dummy UTXO creation (all in one)
- * Body: { payer_address, number_of_dummy_utxos?, network?, fee_level? }
- */
-router.post('/create-dummy-utxo-complete', async (req, res, next) => {
-  try {
-    const {
-      payer_address,
-      number_of_dummy_utxos = 1,
-      network = 'testnet',
-      fee_level = 'hourFee'
-    } = req.body;
-
-    if (!payer_address) {
-      throw new AppError('payer_address is required', 400);
-    }
-
-    const result = await createDummyUtxoComplete(
-      payer_address,
-      number_of_dummy_utxos,
-      network,
-      fee_level
-    );
-
-    res.json({
-      success: true,
-      message: `Dummy UTXO creation completed successfully! Created ${number_of_dummy_utxos} dummy UTXO(s).`,
-      data: result
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
  * Get dummy UTXO transaction status
  * Body: { txid, network? }
  */
@@ -233,6 +171,7 @@ router.post('/generate-dummy-utxo', generateDummyUtxo);
  */
 router.post('/generate-buyer', generateBuyerPSBT);
 
+router.post('/combine-psbt',combinePSBTController)
 // ============================================================================
 // VERIFICATION & VALIDATION
 // ============================================================================
