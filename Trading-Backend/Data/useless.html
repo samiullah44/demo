@@ -3,70 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ordinal Marketplace PSBT Tester</title>
+    <title>Ordinal Marketplace PSBT Tester - Fixed</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; background: #0f0f23; color: #fff; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 30px; padding: 20px; background: #1a1a2e; border-radius: 10px; }
-        .tabs { display: flex; margin-bottom: 20px; border-bottom: 1px solid #333; }
-        .tab { padding: 12px 24px; cursor: pointer; border: 1px solid transparent; margin-right: 5px; background: #252536; }
-        .tab.active { border-color: #4CAF50; border-bottom-color: #0f0f23; background: #2d2d44; border-radius: 5px 5px 0 0; }
-        .tab-content { display: none; padding: 25px; background: #1a1a2e; border-radius: 0 5px 5px 5px; margin-bottom: 20px; }
-        .tab-content.active { display: block; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0f23; color: #fff; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; padding: 30px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; background: linear-gradient(to right, #4CAF50, #45a049); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #333; background: #1a1a2e; border-radius: 10px 10px 0 0; padding: 10px 10px 0 10px; }
+        .tab { padding: 15px 28px; cursor: pointer; border: 2px solid transparent; margin-right: 8px; background: #252536; border-radius: 10px 10px 0 0; transition: all 0.3s; font-weight: 600; }
+        .tab:hover { background: #2d2d44; transform: translateY(-2px); }
+        .tab.active { border-color: #4CAF50; border-bottom-color: #1a1a2e; background: #2d2d44; box-shadow: 0 -2px 10px rgba(76, 175, 80, 0.3); }
+        .tab-content { display: none; padding: 30px; background: #1a1a2e; border-radius: 0 15px 15px 15px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+        .tab-content.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; color: #ccc; font-weight: bold; }
-        input, select, textarea { width: 100%; padding: 12px; background: #2d2d44; border: 1px solid #444; border-radius: 6px; color: #fff; font-size: 14px; }
-        textarea { height: 150px; font-family: monospace; resize: vertical; }
-        button { background: #4CAF50; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; margin: 5px; font-size: 14px; font-weight: bold; }
-        button:hover { background: #45a049; transform: translateY(-1px); }
-        button:disabled { background: #666; cursor: not-allowed; transform: none; }
-        button.secondary { background: #2196F3; }
-        button.danger { background: #f44336; }
-        button.warning { background: #ff9800; }
-        .result { margin-top: 20px; padding: 20px; border-radius: 6px; white-space: pre-wrap; font-family: monospace; font-size: 13px; line-height: 1.4; }
-        .success { border-left: 4px solid #4CAF50; background: #1b5e20; }
-        .error { border-left: 4px solid #f44336; background: #b71c1c; }
-        .info { border-left: 4px solid #2196F3; background: #0d47a1; }
-        .warning { border-left: 4px solid #ff9800; background: #e65100; }
-        .status { padding: 15px; margin: 15px 0; border-radius: 6px; font-weight: bold; }
-        .connected { background: #1b5e20; color: #a5d6a7; }
-        .disconnected { background: #b71c1c; color: #ffcdd2; }
-        .step { background: #252536; padding: 20px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #4CAF50; }
-        .step-number { background: #4CAF50; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 12px; font-weight: bold; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .endpoint-card { background: #252536; padding: 15px; border-radius: 6px; border: 1px solid #444; }
-        .endpoint-card h4 { color: #4CAF50; margin-bottom: 10px; }
-        .debug-section { background: #2d2d44; padding: 15px; border-radius: 6px; margin: 10px 0; }
-        .api-status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px; }
-        .api-status.healthy { background: #4CAF50; }
-        .api-status.unhealthy { background: #f44336; }
-        .method-buttons { display: flex; gap: 10px; margin: 10px 0; }
-        .psbt-method { background: #333; padding: 10px; border-radius: 4px; margin: 5px 0; }
-        .wallet-info { background: #252536; padding: 15px; border-radius: 6px; margin: 10px 0; }
-        .buyer-flow-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
-        .buyer-flow-buttons button { flex: 1; min-width: 120px; }
+        label { display: block; margin-bottom: 8px; color: #ccc; font-weight: 600; font-size: 0.95em; }
+        input, select, textarea { width: 100%; padding: 14px; background: #2d2d44; border: 2px solid #444; border-radius: 8px; color: #fff; font-size: 14px; transition: all 0.3s; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #4CAF50; box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1); }
+        textarea { height: 180px; font-family: 'Courier New', monospace; resize: vertical; line-height: 1.6; }
+        button { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 14px 28px; border: none; border-radius: 8px; cursor: pointer; margin: 8px 8px 8px 0; font-size: 14px; font-weight: 700; transition: all 0.3s; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3); }
+        button:hover { background: linear-gradient(135deg, #45a049 0%, #4CAF50 100%); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4); }
+        button:active { transform: translateY(0); }
+        button:disabled { background: #666; cursor: not-allowed; transform: none; box-shadow: none; }
+        button.secondary { background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3); }
+        button.secondary:hover { background: linear-gradient(135deg, #1976D2 0%, #2196F3 100%); box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4); }
+        button.danger { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); box-shadow: 0 4px 15px rgba(244, 67, 54, 0.3); }
+        button.danger:hover { background: linear-gradient(135deg, #d32f2f 0%, #f44336 100%); box-shadow: 0 6px 20px rgba(244, 67, 54, 0.4); }
+        button.warning { background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3); }
+        button.warning:hover { background: linear-gradient(135deg, #f57c00 0%, #ff9800 100%); box-shadow: 0 6px 20px rgba(255, 152, 0, 0.4); }
+        .result { margin-top: 20px; padding: 20px; border-radius: 10px; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+        .success { border-left: 6px solid #4CAF50; background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%); }
+        .error { border-left: 6px solid #f44336; background: linear-gradient(135deg, #b71c1c 0%, #c62828 100%); animation: shake 0.5s; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+        .info { border-left: 6px solid #2196F3; background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%); }
+        .warning { border-left: 6px solid #ff9800; background: linear-gradient(135deg, #e65100 0%, #ef6c00 100%); }
+        .status { padding: 18px; margin: 15px 0; border-radius: 10px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        .connected { background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%); color: #a5d6a7; border-left: 6px solid #4CAF50; }
+        .disconnected { background: linear-gradient(135deg, #b71c1c 0%, #c62828 100%); color: #ffcdd2; border-left: 6px solid #f44336; }
+        .step { background: linear-gradient(135deg, #252536 0%, #2d2d44 100%); padding: 25px; border-radius: 12px; margin-bottom: 20px; border-left: 6px solid #4CAF50; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .step-number { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 15px; font-weight: 700; font-size: 1.2em; box-shadow: 0 4px 10px rgba(76, 175, 80, 0.4); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .endpoint-card { background: linear-gradient(135deg, #252536 0%, #2d2d44 100%); padding: 20px; border-radius: 12px; border: 2px solid #444; transition: all 0.3s; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .endpoint-card:hover { border-color: #4CAF50; transform: translateY(-5px); box-shadow: 0 8px 25px rgba(76, 175, 80, 0.2); }
+        .endpoint-card h4 { color: #4CAF50; margin-bottom: 15px; font-size: 1.2em; }
+        .api-status { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12px; margin-left: 15px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+        .api-status.healthy { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); animation: pulse 2s infinite; }
+        .api-status.unhealthy { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .method-buttons { display: flex; gap: 12px; margin: 15px 0; flex-wrap: wrap; }
+        .wallet-info { background: linear-gradient(135deg, #252536 0%, #2d2d44 100%); padding: 20px; border-radius: 12px; margin: 15px 0; border: 2px solid #4CAF50; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.2); }
+        .buyer-flow-buttons { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+        .buyer-flow-buttons button { flex: 1; min-width: 180px; }
+        .psbt-preview { background: #1a1a2e; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196F3; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .signature-status { display: inline-block; padding: 4px 10px; border-radius: 15px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+        .signature-status.signed { background: #4CAF50; color: white; }
+        .signature-status.unsigned { background: #f44336; color: white; }
+        .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #4CAF50; animation: spin 1s linear infinite; margin-left: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🎯 Ordinal Marketplace PSBT Tester</h1>
-            <p>Complete testing interface for all PSBT endpoints using Unisat Wallet</p>
-            <div style="margin-top: 10px;">
-                <span>API Status: </span>
+            <p style="font-size: 1.1em; margin-top: 10px; color: #ccc;">Complete OpenOrdex-Compatible Testing Interface</p>
+            <div style="margin-top: 15px;">
+                <span style="font-weight: 600;">API Status: </span>
                 <span id="apiStatus" class="api-status unhealthy">Checking...</span>
             </div>
         </div>
 
         <!-- Protocol Warning -->
-        <div class="warning" id="protocolWarning">
+        <div class="warning result" id="protocolWarning" style="display: none;">
             <strong>⚠️ Important:</strong> This page must be served via HTTP (not file://) for Unisat Wallet to work!
         </div>
 
         <!-- Network Warning -->
-        <div class="warning" id="networkWarning" style="display: none;">
-            <strong>⚠️ Network Mismatch:</strong> Your wallet is on <span id="currentNetwork">mainnet</span> but this test requires <strong>testnet</span>.
+        <div class="warning result" id="networkWarning" style="display: none;">
+            <strong>⚠️ Network Mismatch:</strong> Your wallet is on <span id="currentNetwork">mainnet</span> but this test requires <strong>testnet</strong>.
         </div>
 
         <div class="tabs">
@@ -79,13 +94,12 @@
 
         <!-- Wallet Tab -->
         <div id="wallet" class="tab-content active">
-            <h2>🔗 Wallet Connection & Setup</h2>
+            <h2 style="margin-bottom: 25px; font-size: 1.8em;">🔗 Wallet Connection & Setup</h2>
             
             <div class="step">
                 <h3><span class="step-number">1</span> Check Environment</h3>
                 <button onclick="checkEnvironment()" class="secondary">Check Environment</button>
-                <button onclick="startLocalServer()" class="secondary">Start Local Server</button>
-                <div id="environmentResult" class="result"></div>
+                <div id="environmentResult" class="result" style="display: none;"></div>
             </div>
 
             <div class="step">
@@ -95,9 +109,10 @@
                 </div>
                 <button onclick="connectWallet()" id="connectBtn" disabled>Connect Unisat Wallet</button>
                 <button onclick="getWalletInfo()" id="infoBtn" disabled class="secondary">Get Wallet Info</button>
+                <button onclick="switchNetwork('testnet')" id="switchNetworkBtn" disabled class="warning">Switch to Testnet</button>
                 
                 <div id="walletDetails" class="wallet-info" style="display: none;">
-                    <h4>Wallet Details</h4>
+                    <h4 style="margin-bottom: 15px; font-size: 1.3em;">💎 Wallet Details</h4>
                     <div id="walletInfo"></div>
                 </div>
             </div>
@@ -109,114 +124,95 @@
                     <input type="text" id="backendUrl" value="http://localhost:5000/api">
                 </div>
                 <button onclick="testBackendConnection()" class="secondary">Test Backend Connection</button>
-                <div id="backendResult" class="result"></div>
+                <div id="backendResult" class="result" style="display: none;"></div>
             </div>
         </div>
 
         <!-- Seller Flow Tab -->
         <div id="seller" class="tab-content">
-            <h2>🏷️ Seller Flow - List Your Ordinal</h2>
+            <h2 style="margin-bottom: 25px; font-size: 1.8em;">🏷️ Seller Flow - List Your Ordinal</h2>
             
             <div class="step">
-                <h3><span class="step-number">1</span> Generate Seller PSBT</h3>
+                <h3><span class="step-number">1</span> Generate Seller PSBT (OpenOrdex Style)</h3>
                 <div class="form-group">
                     <label for="sellerData">Seller PSBT Data (JSON):</label>
-                    <textarea id="sellerData">
-{
-    "inscription_id": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37ei0",
-    "inscription_output": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37e:0",
-    "price_sats": 6000,
-    "seller_address": "tb1pwdfqvk837ll68ghwhlpytqdn66vxe7vtjrx6rhxv7uu4g7krf9vspaeh9m",
-    "payment_address": "tb1pwdfqvk837ll68ghwhlpytqdn66vxe7vtjrx6rhxv7uu4g7krf9vspaeh9m",
-    "network": "testnet"
+                    <textarea id="sellerData">{
+  "inscription_id": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37ei0",
+  "inscription_output": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37e:0",
+  "price_sats": 6000,
+  "seller_address": "",
+  "payment_address": "",
+  "network": "testnet"
 }</textarea>
                 </div>
                 
-                <div class="method-buttons">
-                    <button onclick="generateSellerPSBT('compat')" class="compat-btn">Generate Compatible PSBT</button>
-                    <button onclick="generateSellerPSBT('simple')" class="simple-btn">Generate Simple PSBT</button>
-                </div>
+                <button onclick="generateSellerPSBT()" class="primary">🔧 Generate Seller PSBT</button>
+                <button onclick="fillSellerAddress()" class="secondary">📋 Auto-Fill My Address</button>
                 
                 <div class="form-group">
                     <label for="unsignedPSBT">Generated Unsigned PSBT:</label>
                     <textarea id="unsignedPSBT" placeholder="Unsigned PSBT will appear here..."></textarea>
                 </div>
                 
-                <div id="sellerGenerateResult" class="result"></div>
+                <div id="sellerGenerateResult" class="result" style="display: none;"></div>
             </div>
 
             <div class="step">
-                <h3><span class="step-number">2</span> Sign PSBT</h3>
-                <button onclick="signPSBT()" id="signBtn" disabled>Sign PSBT</button>
-                <button onclick="signPSBTSafe()" id="signSafeBtn" disabled class="secondary">Sign PSBT (Safe Mode)</button>
-                <button onclick="analyzePSBT()" class="secondary">Analyze PSBT</button>
+                <h3><span class="step-number">2</span> Sign PSBT with Wallet</h3>
+                <button onclick="signPSBT()" id="signBtn" disabled>🔏 Sign PSBT</button>
+                <button onclick="analyzePSBT()" class="secondary">🔍 Analyze PSBT</button>
                 
                 <div class="form-group">
                     <label for="signedPSBT">Signed PSBT:</label>
                     <textarea id="signedPSBT" placeholder="Signed PSBT will appear here..."></textarea>
                 </div>
                 
-                <div id="sellerSignResult" class="result"></div>
+                <div id="sellerSignResult" class="result" style="display: none;"></div>
             </div>
 
             <div class="step">
                 <h3><span class="step-number">3</span> Create Listing</h3>
-                <button onclick="createListing()" class="compat-btn">Create Listing</button>
-                <button onclick="verifySignedPSBT()" class="secondary">Verify Signed PSBT</button>
-                <div id="sellerListingResult" class="result"></div>
+                <button onclick="createListing()">📝 Create Listing</button>
+                <button onclick="verifySignedPSBT()" class="secondary">✅ Verify Signed PSBT</button>
+                <div id="sellerListingResult" class="result" style="display: none;"></div>
             </div>
         </div>
 
         <!-- Buyer Flow Tab -->
         <div id="buyer" class="tab-content">
-            <h2>🛒 Buyer Flow - Purchase Ordinal</h2>
+            <h2 style="margin-bottom: 25px; font-size: 1.8em;">🛒 Buyer Flow - Purchase Ordinal</h2>
             
             <div class="step">
-                <h3><span class="step-number">1</span> Create Dummy UTXO (First Time)</h3>
-                <div class="form-group">
-                    <label for="dummyUtxoData">Dummy UTXO Data (JSON):</label>
-                    <textarea id="dummyUtxoData">
-{
-    "payer_address": "",
-    "number_of_dummy_utxos": 1,
-    "network": "testnet",
-    "fee_level": "hourFee"
-}</textarea>
-                </div>
-                <button onclick="generateDummyUTXO()" class="secondary">Generate Dummy UTXO PSBT</button>
-                <div id="dummyUtxoResult" class="result"></div>
-            </div>
-
-            <div class="step">
-                <h3><span class="step-number">2</span> Generate Buyer PSBT</h3>
+                <h3><span class="step-number">1</span> Generate Buyer PSBT</h3>
                 <div class="form-group">
                     <label for="buyerData">Buyer PSBT Data (JSON):</label>
-                    <textarea id="buyerData">
-{
-    "listing_id": "",
-    "buyer_payment_address": "",
-    "buyer_receive_address": "",
-    "fee_level": "hourFee",
-    "network": "testnet"
+                    <textarea id="buyerData">{
+  "listing_id": "",
+  "buyer_payment_address": "",
+  "buyer_receive_address": "",
+  "fee_level": "hourFee",
+  "network": "testnet"
 }</textarea>
                 </div>
-                <button onclick="generateBuyerPSBT()" class="compat-btn">Generate Buyer PSBT</button>
+                <button onclick="generateBuyerPSBT()">🔧 Generate Buyer PSBT</button>
+                <button onclick="fillBuyerAddress()" class="secondary">📋 Auto-Fill My Address</button>
                 
                 <div class="form-group">
                     <label for="buyerUnsignedPSBT">Generated Buyer Unsigned PSBT:</label>
                     <textarea id="buyerUnsignedPSBT" placeholder="Buyer unsigned PSBT will appear here..."></textarea>
                 </div>
                 
-                <div id="buyerGenerateResult" class="result"></div>
+                <div id="buyerGenerateResult" class="result" style="display: none;"></div>
             </div>
 
             <div class="step">
-                <h3><span class="step-number">3</span> Complete Purchase Flow</h3>
+                <h3><span class="step-number">2</span> Complete Purchase Flow</h3>
                 
                 <div class="buyer-flow-buttons">
-                    <button onclick="signBuyerPSBT()" class="secondary" id="signBuyerBtn">🔏 Sign Buyer PSBT</button>
-                    <button onclick="verifyBuyerPSBT()" class="warning" id="verifyBuyerBtn">✅ Verify Buyer PSBT</button>
-                    <button onclick="broadcastBuyerTransaction()" class="compat-btn" id="broadcastBuyerBtn">📡 Broadcast Transaction</button>
+                    <button onclick="signBuyerPSBT()">1. Sign Buyer PSBT</button>
+                    <button onclick="combinePSBTs()">2. Combine PSBTs</button>
+                    <button onclick="verifyBuyerPSBT()">3. Verify Combined</button>
+                    <button onclick="broadcastBuyerTransaction()">4. Broadcast</button>
                 </div>
                 
                 <div class="form-group">
@@ -224,18 +220,13 @@
                     <textarea id="buyerSignedPSBT" placeholder="Buyer signed PSBT will appear here..."></textarea>
                 </div>
                 
-                <div class="form-group">
-                    <label for="broadcastResult">Broadcast Result:</label>
-                    <textarea id="broadcastResult" placeholder="Transaction broadcast result will appear here..."></textarea>
-                </div>
-                
-                <div id="buyerBroadcastResult" class="result"></div>
+                <div id="buyerBroadcastResult" class="result" style="display: none;"></div>
             </div>
         </div>
 
         <!-- Utilities Tab -->
         <div id="utilities" class="tab-content">
-            <h2>🔧 Utility Endpoints</h2>
+            <h2 style="margin-bottom: 25px; font-size: 1.8em;">🔧 Utility Endpoints</h2>
             
             <div class="grid">
                 <div class="endpoint-card">
@@ -252,24 +243,6 @@
                 </div>
 
                 <div class="endpoint-card">
-                    <h4>📋 Decode PSBT</h4>
-                    <div class="form-group">
-                        <label>PSBT/Transaction Data:</label>
-                        <textarea id="decodeData" placeholder="Paste PSBT or transaction data"></textarea>
-                    </div>
-                    <button onclick="decodePSBTData()" class="secondary">Decode Data</button>
-                </div>
-
-                <div class="endpoint-card">
-                    <h4>✅ Validate PSBT</h4>
-                    <div class="form-group">
-                        <label>PSBT Base64:</label>
-                        <textarea id="validatePSBTData" placeholder="Paste PSBT base64"></textarea>
-                    </div>
-                    <button onclick="validatePSBT()" class="secondary">Validate PSBT</button>
-                </div>
-
-                <div class="endpoint-card">
                     <h4>🎯 Analyze Address</h4>
                     <div class="form-group">
                         <label>Bitcoin Address:</label>
@@ -279,33 +252,21 @@
                 </div>
             </div>
             
-            <div id="utilitiesResult" class="result"></div>
+            <div id="utilitiesResult" class="result" style="display: none;"></div>
         </div>
 
         <!-- Debug Tab -->
         <div id="debug" class="tab-content">
-            <h2>🐛 Debug & Diagnostics</h2>
+            <h2 style="margin-bottom: 25px; font-size: 1.8em;">🐛 Debug & Diagnostics</h2>
             
-            <div class="debug-section">
-                <button onclick="runFullDiagnostics()" class="warning">Run Full Diagnostics</button>
-                <button onclick="testAllEndpoints()" class="warning">Test All Endpoints</button>
-                <button onclick="showCommonFixes()" class="secondary">Show Common Fixes</button>
-                <button onclick="clearAll()" class="danger">Clear All</button>
-                <button onclick="loadSampleData()" class="secondary">Load Sample Data</button>
-            </div>
-
             <div class="step">
-                <h3>Endpoint Testing</h3>
-                <div class="method-buttons">
-                    <button onclick="testEndpoint('health')" class="secondary">Test /health</button>
-                    <button onclick="testEndpoint('generate-seller')" class="secondary">Test /generate-seller</button>
-                    <button onclick="testEndpoint('generate-buyer')" class="secondary">Test /generate-buyer</button>
-                    <button onclick="testEndpoint('verify-ownership')" class="secondary">Test /verify-ownership</button>
-                    <button onclick="testEndpoint('decode')" class="secondary">Test /decode</button>
-                </div>
+                <button onclick="runFullDiagnostics()" class="warning">🔧 Run Full Diagnostics</button>
+                <button onclick="showCommonFixes()" class="secondary">💡 Show Common Fixes</button>
+                <button onclick="clearAll()" class="danger">🗑️ Clear All</button>
+                <button onclick="loadSampleData()" class="secondary">📝 Load Sample Data</button>
             </div>
 
-            <div id="debugResult" class="result"></div>
+            <div id="debugResult" class="result" style="display: none;"></div>
         </div>
     </div>
 
@@ -314,10 +275,6 @@
         let isWalletConnected = false;
         let currentWalletAddress = '';
         let currentWalletNetwork = '';
-        let currentUnsignedPSBT = '';
-        let currentSignedPSBT = '';
-        let currentBuyerUnsignedPSBT = '';
-        let currentBuyerSignedPSBT = '';
 
         // Initialize on load
         window.addEventListener('load', function() {
@@ -339,27 +296,19 @@
         function checkEnvironment() {
             const protocol = window.location.protocol;
             const result = document.getElementById('environmentResult');
+            const warning = document.getElementById('protocolWarning');
             
             if (protocol === 'file:') {
-                result.innerHTML = '❌ WRONG PROTOCOL: file://\n✅ REQUIRED: http:// or https://\n\nUse "Start Local Server" button.';
+                warning.style.display = 'block';
+                result.innerHTML = '❌ WRONG PROTOCOL: file://\n✅ REQUIRED: http:// or https://\n\n💡 Use a local server to test with Unisat Wallet.';
                 result.className = 'result error';
+                result.style.display = 'block';
             } else {
-                result.innerHTML = '✅ CORRECT PROTOCOL: ' + protocol + '\n✅ Unisat Wallet should work.';
+                warning.style.display = 'none';
+                result.innerHTML = '✅ CORRECT PROTOCOL: ' + protocol + '\n✅ Unisat Wallet should work correctly.';
                 result.className = 'result success';
+                result.style.display = 'block';
             }
-        }
-
-        // Start local server instructions
-        function startLocalServer() {
-            const result = document.getElementById('environmentResult');
-            result.innerHTML = 
-                '🚀 Starting Local Server:\n\n' +
-                '1. Install http-server:\n' +
-                '   npm install -g http-server\n\n' +
-                '2. Run in your project folder:\n' +
-                '   http-server -p 3000 --cors\n\n' +
-                '3. Open: http://localhost:3000';
-            result.className = 'result info';
         }
 
         // Check Unisat Wallet availability
@@ -368,13 +317,12 @@
             const connectBtn = document.getElementById('connectBtn');
             
             if (typeof window.unisat === 'undefined') {
-                walletStatus.innerHTML = '❌ Unisat Wallet not detected. Install the extension.';
+                walletStatus.innerHTML = '❌ Unisat Wallet not detected. Please install the extension.';
                 walletStatus.className = 'status disconnected';
                 connectBtn.disabled = true;
                 return false;
             }
 
-            // Check required methods
             const requiredMethods = ['requestAccounts', 'getAccounts', 'getNetwork', 'signPsbt'];
             const missingMethods = requiredMethods.filter(method => typeof window.unisat[method] !== 'function');
             
@@ -395,7 +343,7 @@
         async function connectWallet() {
             try {
                 const walletStatus = document.getElementById('walletStatus');
-                walletStatus.innerHTML = '🔄 Connecting to Unisat Wallet...';
+                walletStatus.innerHTML = '🔄 Connecting to Unisat Wallet...<span class="loading-spinner"></span>';
                 
                 const accounts = await window.unisat.requestAccounts();
                 if (!accounts || accounts.length === 0) {
@@ -405,33 +353,43 @@
                 currentWalletAddress = accounts[0];
                 currentWalletNetwork = await window.unisat.getNetwork();
                 
-                // Check network
                 checkNetworkCompatibility(currentWalletNetwork);
                 
                 isWalletConnected = true;
                 document.getElementById('signBtn').disabled = false;
-                document.getElementById('signSafeBtn').disabled = false;
                 document.getElementById('infoBtn').disabled = false;
+                document.getElementById('switchNetworkBtn').disabled = false;
                 document.getElementById('signBuyerBtn').disabled = false;
                 
-                walletStatus.innerHTML = `✅ Connected!\nAddress: ${currentWalletAddress}\nNetwork: ${currentWalletNetwork}`;
+                walletStatus.innerHTML = `✅ Connected Successfully!\nAddress: ${currentWalletAddress}\nNetwork: ${currentWalletNetwork}`;
                 walletStatus.className = 'status connected';
                 
-                // Show wallet details
                 document.getElementById('walletDetails').style.display = 'block';
                 document.getElementById('walletInfo').innerHTML = `
                     <strong>Address:</strong> ${currentWalletAddress}<br>
-                    <strong>Network:</strong> ${currentWalletNetwork}<br>
-                    <strong>Status:</strong> Connected
+                    <strong>Network:</strong> <span style="color: ${currentWalletNetwork === 'testnet' ? '#4CAF50' : '#f44336'}">${currentWalletNetwork}</span><br>
+                    <strong>Status:</strong> <span style="color: #4CAF50">Connected</span>
                 `;
                 
-                // Update form fields with wallet address
                 updateFormFieldsWithAddress(currentWalletAddress);
                 
             } catch (error) {
                 const walletStatus = document.getElementById('walletStatus');
                 walletStatus.innerHTML = `❌ Connection failed: ${error.message}`;
                 walletStatus.className = 'status disconnected';
+            }
+        }
+
+        // Switch network
+        async function switchNetwork(network) {
+            try {
+                await window.unisat.switchNetwork(network);
+                showResult('walletDetails', `✅ Switched to ${network}`, 'success');
+                
+                // Reconnect to update network info
+                setTimeout(() => connectWallet(), 500);
+            } catch (error) {
+                showResult('walletDetails', `❌ Network switch failed: ${error.message}`, 'error');
             }
         }
 
@@ -448,7 +406,6 @@
 
         // Update form fields with wallet address
         function updateFormFieldsWithAddress(address) {
-            // Update seller data
             try {
                 const sellerData = JSON.parse(document.getElementById('sellerData').value);
                 sellerData.seller_address = address;
@@ -456,7 +413,6 @@
                 document.getElementById('sellerData').value = JSON.stringify(sellerData, null, 2);
             } catch (e) {}
             
-            // Update buyer data
             try {
                 const buyerData = JSON.parse(document.getElementById('buyerData').value);
                 buyerData.buyer_payment_address = address;
@@ -464,16 +420,28 @@
                 document.getElementById('buyerData').value = JSON.stringify(buyerData, null, 2);
             } catch (e) {}
             
-            // Update dummy UTXO data
-            try {
-                const dummyData = JSON.parse(document.getElementById('dummyUtxoData').value);
-                dummyData.payer_address = address;
-                document.getElementById('dummyUtxoData').value = JSON.stringify(dummyData, null, 2);
-            } catch (e) {}
-            
-            // Update verification address
             document.getElementById('verifyAddress').value = address;
             document.getElementById('analyzeAddress').value = address;
+        }
+
+        // Fill seller address
+        function fillSellerAddress() {
+            if (!isWalletConnected) {
+                showResult('sellerGenerateResult', '❌ Connect wallet first', 'error');
+                return;
+            }
+            updateFormFieldsWithAddress(currentWalletAddress);
+            showResult('sellerGenerateResult', '✅ Address filled from wallet', 'success');
+        }
+
+        // Fill buyer address
+        function fillBuyerAddress() {
+            if (!isWalletConnected) {
+                showResult('buyerGenerateResult', '❌ Connect wallet first', 'error');
+                return;
+            }
+            updateFormFieldsWithAddress(currentWalletAddress);
+            showResult('buyerGenerateResult', '✅ Address filled from wallet', 'success');
         }
 
         // Get wallet info
@@ -488,9 +456,9 @@
                 const info = `💰 Wallet Information:\n\n` +
                     `📍 Address: ${accounts[0]}\n` +
                     `🌐 Network: ${network}\n` +
-                    `⚖️ Balance: ${balance.total} sats\n` +
-                    `💎 Confirmd: ${balance.confirmed} sats\n` +
-                    `🔄 Unconfirmed: ${balance.unconfirmed} sats`;
+                    `⚖️ Balance: ${balance.total.toLocaleString()} sats\n` +
+                    `💎 Confirmed: ${balance.confirmed.toLocaleString()} sats\n` +
+                    `🔄 Unconfirmed: ${balance.unconfirmed.toLocaleString()} sats`;
                 
                 showResult('walletDetails', info, 'success');
             } catch (error) {
@@ -502,7 +470,7 @@
         async function testBackendConnection() {
             try {
                 const backendUrl = document.getElementById('backendUrl').value;
-                showResult('backendResult', '🔄 Testing backend connection...', 'info');
+                showResult('backendResult', '🔄 Testing backend connection...<span class="loading-spinner"></span>', 'info');
 
                 const response = await fetch(`${backendUrl}/psbt/health`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -511,7 +479,7 @@
                 document.getElementById('apiStatus').textContent = 'Healthy';
                 document.getElementById('apiStatus').className = 'api-status healthy';
                 
-                showResult('backendResult', `✅ Backend connected!\n\n${JSON.stringify(result, null, 2)}`, 'success');
+                showResult('backendResult', `✅ Backend connected successfully!\n\n${JSON.stringify(result, null, 2)}`, 'success');
             } catch (error) {
                 document.getElementById('apiStatus').textContent = 'Unhealthy';
                 document.getElementById('apiStatus').className = 'api-status unhealthy';
@@ -523,7 +491,7 @@
         async function callAPI(endpoint, data, resultElementId) {
             try {
                 const backendUrl = document.getElementById('backendUrl').value;
-                showResult(resultElementId, `🔄 Calling ${endpoint}...`, 'info');
+                showResult(resultElementId, `🔄 Calling ${endpoint}...<span class="loading-spinner"></span>`, 'info');
 
                 const response = await fetch(`${backendUrl}/psbt/${endpoint}`, {
                     method: 'POST',
@@ -545,22 +513,20 @@
                     throw new Error(result.message || `API call failed for ${endpoint}`);
                 }
             } catch (error) {
-                showResult(resultElementId, `❌ ${endpoint} failed: ${error.message}`, 'error');
+                showResult(resultElementId, `❌ ${endpoint} failed:\n${error.message}`, 'error');
                 return null;
             }
         }
 
-        // Seller PSBT generation
-        async function generateSellerPSBT(method) {
+        // Generate Seller PSBT
+        async function generateSellerPSBT() {
             try {
                 const data = JSON.parse(document.getElementById('sellerData').value);
-                const endpoint = method === 'simple' ? 'generate-seller-simple' : 'generate-seller';
                 
-                const result = await callAPI(endpoint, data, 'sellerGenerateResult');
+                const result = await callAPI('generate-seller', data, 'sellerGenerateResult');
                 
                 if (result && result.data && result.data.unsigned_psbt) {
-                    currentUnsignedPSBT = result.data.unsigned_psbt;
-                    document.getElementById('unsignedPSBT').value = currentUnsignedPSBT;
+                    document.getElementById('unsignedPSBT').value = result.data.unsigned_psbt;
                 }
             } catch (error) {
                 showResult('sellerGenerateResult', `❌ Invalid JSON data: ${error.message}`, 'error');
@@ -575,34 +541,18 @@
                 const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
                 if (!unsignedPSBT) throw new Error('No PSBT to sign');
 
-                showResult('sellerSignResult', '🔄 Signing PSBT for listing...', 'info');
+                showResult('sellerSignResult', '🔄 Signing PSBT...<span class="loading-spinner"></span>', 'info');
                 
-                let signedPSBT;
+                const signedPSBT = await window.unisat.signPsbt(unsignedPSBT, {
+                    autoFinalized: false
+                });
                 
-                try {
-                    // First try standard signing
-                    signedPSBT = await window.unisat.signPsbt(unsignedPSBT);
-                } catch (error) {
-                    console.log('Standard signing failed:', error.message);
-                    
-                    // If standard fails, try with explicit options
-                    try {
-                        signedPSBT = await window.unisat.signPsbt(unsignedPSBT, {
-                            autoFinalized: false,
-                            sighashTypes: ['SIGHASH_ALL']
-                        });
-                    } catch (secondError) {
-                        throw new Error(`Signing failed: ${secondError.message}. Make sure you own the inscription and have sufficient funds.`);
-                    }
-                }
-                
-                currentSignedPSBT = signedPSBT;
                 document.getElementById('signedPSBT').value = signedPSBT;
                 
                 showResult('sellerSignResult', 
                     '✅ PSBT signed successfully!\n\n' +
                     '💡 The PSBT is now ready for listing creation.\n' +
-                    'Note: Some finalization warnings are normal for Taproot PSBTs.', 
+                    '📝 Proceed to Step 3 to create the listing.', 
                     'success'
                 );
                 
@@ -619,30 +569,6 @@
             }
         }
 
-        // Safe mode signing
-        async function signPSBTSafe() {
-            try {
-                if (!isWalletConnected) throw new Error('Connect wallet first');
-                
-                const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
-                if (!unsignedPSBT) throw new Error('No PSBT to sign');
-
-                showResult('sellerSignResult', '🔄 Signing PSBT (Safe Mode)...', 'info');
-                
-                const signedPSBT = await window.unisat.signPsbt(unsignedPSBT, {
-                    autoFinalized: false,
-                    sighashTypes: ['SIGHASH_ALL']
-                });
-                
-                currentSignedPSBT = signedPSBT;
-                document.getElementById('signedPSBT').value = signedPSBT;
-                
-                showResult('sellerSignResult', '✅ PSBT signed successfully (Safe Mode)!', 'success');
-            } catch (error) {
-                showResult('sellerSignResult', `❌ Safe signing failed: ${error.message}`, 'error');
-            }
-        }
-
         // Analyze PSBT
         async function analyzePSBT() {
             const psbt = document.getElementById('unsignedPSBT').value.trim();
@@ -653,9 +579,10 @@
 
             const analysis = `🔍 PSBT Analysis:\n\n` +
                 `📦 Size: ${psbt.length} characters\n` +
-                `💾 Approx: ${Math.ceil(psbt.length * 0.75)} bytes\n` +
-                `📊 Type: ${psbt.startsWith('c') ? 'Base64 PSBT' : 'Unknown format'}\n\n` +
-                `💡 ${psbt.length > 1000 ? 'Large PSBT, consider simple method' : 'PSBT size looks good'}`;
+                `💾 Approx Bytes: ${Math.ceil(psbt.length * 0.75)}\n` +
+                `📊 Format: ${psbt.startsWith('c') ? 'Base64 PSBT ✅' : 'Unknown format ❌'}\n` +
+                `🔐 Compatible: ${psbt.length < 5000 ? 'Yes ✅' : 'Large PSBT ⚠️'}\n\n` +
+                `💡 Status: ${psbt.length > 1000 ? 'PSBT looks valid' : 'PSBT might be incomplete'}`;
 
             showResult('sellerSignResult', analysis, 'info');
         }
@@ -664,10 +591,10 @@
         async function createListing() {
             try {
                 const sellerData = JSON.parse(document.getElementById('sellerData').value);
-                 const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
+                const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
                 const signedPSBT = document.getElementById('signedPSBT').value.trim();
                 
-                if (!signedPSBT) throw new Error('No signed PSBT provided');
+                if (!signedPSBT) throw new Error('No signed PSBT provided. Sign the PSBT first.');
 
                 const listingData = {
                     ...sellerData,
@@ -689,78 +616,163 @@
                 return;
             }
 
-            await callAPI('verify-signed-psbt', { signed_psbt: signedPSBT }, 'sellerListingResult');
+            await callAPI('verify-signed-psbt', { signed_psbt: signedPSBT, network: 'testnet' }, 'sellerListingResult');
         }
 
-        // Buyer flow functions
-        async function generateDummyUTXO() {
-            try {
-                const data = JSON.parse(document.getElementById('dummyUtxoData').value);
-                await callAPI('generate-dummy-utxo', data, 'dummyUtxoResult');
-            } catch (error) {
-                showResult('dummyUtxoResult', `❌ Invalid JSON: ${error.message}`, 'error');
-            }
-        }
-
+        let buyer_metadata;
+        // Generate Buyer PSBT
         async function generateBuyerPSBT() {
             try {
                 const data = JSON.parse(document.getElementById('buyerData').value);
                 const result = await callAPI('generate-buyer', data, 'buyerGenerateResult');
+                buyer_metadata = result.data.metadata;
+                console.log('Buyer metadata stored:', buyer_metadata);
                 
                 if (result && result.data && result.data.unsigned_psbt) {
-                    currentBuyerUnsignedPSBT = result.data.unsigned_psbt;
-                    document.getElementById('buyerUnsignedPSBT').value = currentBuyerUnsignedPSBT;
+                    document.getElementById('buyerUnsignedPSBT').value = result.data.unsigned_psbt;
                     document.getElementById('buyerSignedPSBT').value = '';
-                    document.getElementById('broadcastResult').value = '';
                 }
             } catch (error) {
                 showResult('buyerGenerateResult', `❌ Invalid JSON: ${error.message}`, 'error');
             }
         }
 
-        // Sign Buyer PSBT using backend endpoint
-        async function signBuyerPSBT() {
-            try {
-                const buyerUnsignedPSBT = document.getElementById('buyerUnsignedPSBT').value.trim();
-                if (!buyerUnsignedPSBT) {
-                    throw new Error('No buyer PSBT to sign. Generate buyer PSBT first.');
-                }
 
-                if (!isWalletConnected) {
-                    throw new Error('Connect wallet first');
-                }
-
-                showResult('buyerBroadcastResult', '🔄 Signing buyer PSBT with your wallet...', 'info');
-
-                // Sign using Unisat wallet (frontend signing)
-                const signedPSBT = await window.unisat.signPsbt(buyerUnsignedPSBT, {
-                    autoFinalized: false,
-                    sighashTypes: ['SIGHASH_ALL']
-                });
-
-                currentBuyerSignedPSBT = signedPSBT;
-                document.getElementById('buyerSignedPSBT').value = signedPSBT;
-
-                showResult('buyerBroadcastResult', 
-                    '✅ Buyer PSBT signed successfully!\n\n' +
-                    'Next: Verify the signed PSBT before broadcasting.', 
-                    'success'
-                );
-
-            } catch (error) {
-                showResult('buyerBroadcastResult', 
-                    `❌ Buyer PSBT signing failed: ${error.message}\n\n` +
-                    '🔧 Troubleshooting:\n' +
-                    '• Make sure you have sufficient funds\n' +
-                    '• Check wallet is connected\n' +
-                    '• Verify the PSBT was generated correctly', 
-                    'error'
-                );
-            }
+        // Sign Buyer PSBT
+// Step 1: Sign Buyer PSBT (separate from seller)
+async function signBuyerPSBT() {
+    try {
+        const buyerUnsignedPSBT = document.getElementById('buyerUnsignedPSBT').value.trim();
+        if (!buyerUnsignedPSBT) {
+            throw new Error('No buyer PSBT to sign');
         }
 
-        // Verify Buyer PSBT using backend endpoint
-        async function verifyBuyerPSBT() {
+        if (!isWalletConnected) {
+            throw new Error('Connect wallet first');
+        }
+
+        showResult('buyerBroadcastResult', '🔄 Signing buyer PSBT...<span class="loading-spinner"></span>', 'info');
+
+        // Sign buyer's own inputs only
+        const signedPSBT = await window.unisat.signPsbt(buyerUnsignedPSBT, {
+            autoFinalized: false
+        });
+
+        document.getElementById('buyerSignedPSBT').value = signedPSBT;
+
+        showResult('buyerBroadcastResult', 
+            '✅ Buyer PSBT signed successfully!\n\n' +
+            '📝 This PSBT contains only YOUR payment inputs\n' +
+            '🔗 Next: Combine with seller\'s PSBT before broadcasting', 
+            'success'
+        );
+
+    } catch (error) {
+        showResult('buyerBroadcastResult', `❌ Signing failed: ${error.message}`, 'error');
+    }
+}
+
+// Step 2: Combine PSBTs
+async function combinePSBTs() {
+  try {
+    const buyerSignedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+    if (!buyerSignedPSBT) {
+      throw new Error('Sign buyer PSBT first');
+    }
+
+    const buyerDataRaw = document.getElementById('buyerData').value;
+    const buyerData = JSON.parse(buyerDataRaw);
+
+    // Get seller signed PSBT from the seller tab
+    const sellerSignedPSBT = document.getElementById('signedPSBT').value.trim();
+    if (!sellerSignedPSBT) {
+      throw new Error('Seller PSBT not found. Please go to Seller Flow tab and sign the seller PSBT first.');
+    }
+
+    showResult('buyerBroadcastResult', '🔗 Combining PSBTs...', 'info');
+    
+    console.log('🔗 Combining PSBTs with data:', {
+      sellerSignedPSBT: sellerSignedPSBT.substring(0, 50) + '...',
+      buyerSignedPSBT: buyerSignedPSBT.substring(0, 50) + '...',
+      metadata: buyer_metadata
+    });
+
+    // FIX: Send correct parameter names matching backend expectation
+    const result = await callAPI('combine-psbt', {
+      sellerSignedPsbt: sellerSignedPSBT,   
+      buyerSignedPsbt: buyerSignedPSBT,     
+      metadata: buyer_metadata,
+      networkType: buyer_metadata?.network || 'testnet'  // Changed from network
+    }, 'buyerBroadcastResult');
+console.log("result:",result);
+    if (result && result.data) {
+      // Store combined PSBT for broadcasting
+      document.getElementById('buyerSignedPSBT').value = result.data.psbt;
+      
+      showResult('buyerBroadcastResult', 
+        '✅ PSBTs combined successfully!\n\n' +
+        `📊 Combined Transaction Details:\n` +
+        `   Total Inputs: ${result.data.metadata.totalInputs}\n` +
+        `   Total Outputs: ${result.data.metadata.totalOutputs}\n` +
+        `   Seller Input: Index ${result.data.metadata.sellerInputIndex}\n` +
+        `   Buyer Inputs: Start from Index ${result.data.metadata.buyerInputStartIndex}\n\n` +
+        '🔐 Structure:\n' +
+        `   • Input 0: Seller's ordinal (SIGHASH_SINGLE|ANYONECANPAY)\n` +
+        `   • Inputs 1+: Buyer's payment UTXOs (SIGHASH_ALL)\n` +
+        `   • Output 0: Ordinal → Buyer\n` +
+        `   • Output 1: Payment → Seller\n\n` +
+        '🚀 Ready to broadcast!', 
+        'success'
+      );
+    }
+  } catch (error) {
+    console.error('❌ Combination error:', error);
+    showResult('buyerBroadcastResult', 
+      `❌ Combination failed: ${error.message}\n\n` +
+      '🔧 Troubleshooting:\n' +
+      '• Ensure buyer PSBT is signed (Step 1)\n' +
+      '• Verify seller PSBT exists in Seller Flow tab\n' +
+      '• Check that buyer PSBT was generated correctly\n' +
+      '• Make sure metadata contains inscription_output\n' +
+      '• Verify both PSBTs are from the same network', 
+      'error'
+    );
+  }
+}
+
+// Step 3: Broadcast Combined Transaction
+async function broadcastBuyerTransaction() {
+    try {
+        const combinedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+        if (!combinedPSBT) {
+            throw new Error('Combine PSBTs first');
+        }
+
+        const buyerData = JSON.parse(document.getElementById('buyerData').value);
+        const network = buyerData.metadata.network || 'testnet';
+
+        showResult('buyerBroadcastResult', '📡 Broadcasting...<span class="loading-spinner"></span>', 'info');
+
+        const result = await callAPI('broadcast', {
+            signed_psbt: combinedPSBT,
+            network: network
+        }, 'buyerBroadcastResult');
+
+        if (result && result.data) {
+            showResult('buyerBroadcastResult', 
+                '🎉 Transaction broadcast successfully!\n\n' +
+                `TXID: ${result.data.txid}\n` +
+                `Explorer: ${result.data.explorer_url}`, 
+                'success'
+            );
+        }
+
+    } catch (error) {
+        showResult('buyerBroadcastResult', `❌ Broadcast failed: ${error.message}`, 'error');
+    }
+}// Verify Buyer PSBT
+ 
+async function verifyBuyerPSBT() {
             try {
                 const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
                 if (!signedPSBT) {
@@ -780,18 +792,18 @@
                         showResult('buyerBroadcastResult', 
                             '✅ PSBT verified and ready for broadcast!\n\n' +
                             `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
-                            `Fully Signed: ${result.data.isFullySigned}\n` +
-                            `Can Finalize: ${result.data.canFinalize}\n\n` +
-                            'You can now broadcast the transaction.', 
+                            `Fully Signed: ${result.data.isFullySigned ? '✅' : '❌'}\n` +
+                            `Can Finalize: ${result.data.canFinalize ? '✅' : '❌'}\n\n` +
+                            '🚀 You can now broadcast the transaction.', 
                             'success'
                         );
                     } else {
                         showResult('buyerBroadcastResult', 
                             '⚠️ PSBT verification warning:\n\n' +
                             `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
-                            `Fully Signed: ${result.data.isFullySigned}\n` +
-                            `Can Finalize: ${result.data.canFinalize}\n\n` +
-                            'Some signatures may be missing or incomplete.', 
+                            `Fully Signed: ${result.data.isFullySigned ? '✅' : '❌'}\n` +
+                            `Can Finalize: ${result.data.canFinalize ? '✅' : '❌'}\n\n` +
+                            '⚠️ Some signatures may be missing or incomplete.', 
                             'warning'
                         );
                     }
@@ -802,7 +814,7 @@
             }
         }
 
-        // Broadcast Buyer Transaction using backend endpoint
+        // Broadcast Buyer Transaction
         async function broadcastBuyerTransaction() {
             try {
                 const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
@@ -813,7 +825,7 @@
                 const buyerData = JSON.parse(document.getElementById('buyerData').value);
                 const network = buyerData.network || 'testnet';
 
-                showResult('buyerBroadcastResult', '📡 Broadcasting transaction to blockchain...', 'info');
+                showResult('buyerBroadcastResult', '📡 Broadcasting transaction...<span class="loading-spinner"></span>', 'info');
 
                 const result = await callAPI('broadcast', { 
                     signed_psbt: signedPSBT,
@@ -821,14 +833,12 @@
                 }, 'buyerBroadcastResult');
 
                 if (result && result.data) {
-                    document.getElementById('broadcastResult').value = JSON.stringify(result.data, null, 2);
-                    
                     showResult('buyerBroadcastResult', 
                         '🎉 Transaction broadcast successfully!\n\n' +
                         `Transaction ID: ${result.data.txid}\n` +
                         `Network: ${result.data.network}\n` +
                         `Explorer: ${result.data.explorer_url || 'N/A'}\n\n` +
-                        'Your ordinal purchase is being processed!', 
+                        '✅ Your ordinal purchase is being processed!', 
                         'success'
                     );
                 }
@@ -839,7 +849,8 @@
                     '🔧 Troubleshooting:\n' +
                     '• Check if PSBT is fully signed\n' +
                     '• Verify network compatibility\n' +
-                    '• Ensure sufficient fee coverage', 
+                    '• Ensure sufficient fee coverage\n' +
+                    '• Check if UTXOs are still unspent', 
                     'error'
                 );
             }
@@ -855,22 +866,6 @@
             await callAPI('verify-ownership', data, 'utilitiesResult');
         }
 
-        async function decodePSBTData() {
-            const data = {
-                encoded_data: document.getElementById('decodeData').value,
-                network: 'testnet'
-            };
-            await callAPI('decode', data, 'utilitiesResult');
-        }
-
-        async function validatePSBT() {
-            const data = {
-                psbt_base64: document.getElementById('validatePSBTData').value,
-                network: 'testnet'
-            };
-            await callAPI('validate', data, 'utilitiesResult');
-        }
-
         async function analyzeAddress() {
             const data = {
                 address: document.getElementById('analyzeAddress').value,
@@ -883,13 +878,9 @@
         async function runFullDiagnostics() {
             let diagnostics = '🔧 Running Full Diagnostics...\n\n';
             
-            // Protocol check
             diagnostics += `1. Protocol: ${window.location.protocol} ${window.location.protocol === 'file:' ? '❌' : '✅'}\n`;
-            
-            // Wallet check
             diagnostics += `2. Unisat Available: ${typeof window.unisat !== 'undefined' ? '✅' : '❌'}\n`;
             
-            // Backend check
             try {
                 const backendUrl = document.getElementById('backendUrl').value;
                 const response = await fetch(`${backendUrl}/psbt/health`);
@@ -898,87 +889,27 @@
                 diagnostics += `3. Backend Connection: ❌\n`;
             }
             
-            // Wallet connection
             diagnostics += `4. Wallet Connected: ${isWalletConnected ? '✅' : '❌'}\n`;
-            
-            // Network check
             diagnostics += `5. Wallet Network: ${currentWalletNetwork} ${currentWalletNetwork === 'testnet' ? '✅' : '❌'}\n`;
             
             showResult('debugResult', diagnostics, 'info');
         }
 
-        async function testAllEndpoints() {
-            showResult('debugResult', '🧪 Testing all endpoints...', 'info');
-            
-            const endpoints = [
-                'health',
-                'generate-seller',
-                'generate-buyer', 
-                'verify-ownership',
-                'decode'
-            ];
-            
-            for (const endpoint of endpoints) {
-                await testEndpoint(endpoint);
-                await new Promise(resolve => setTimeout(resolve, 500)); // Delay between tests
-            }
-        }
-
-        async function testEndpoint(endpoint) {
-            const backendUrl = document.getElementById('backendUrl').value;
-            let testData = {};
-            
-            // Add sample data for specific endpoints
-            if (endpoint === 'generate-seller') {
-                testData = JSON.parse(document.getElementById('sellerData').value);
-            } else if (endpoint === 'generate-buyer') {
-                testData = JSON.parse(document.getElementById('buyerData').value);
-            } else if (endpoint === 'verify-ownership') {
-                testData = {
-                    inscription_id: 'samplei0',
-                    address: currentWalletAddress || 'tb1q...',
-                    network: 'testnet'
-                };
-            } else if (endpoint === 'decode') {
-                testData = {
-                    encoded_data: 'cHNidP8BAF4CAAAAAA==',
-                    network: 'testnet'
-                };
-            }
-            
-            try {
-                const response = await fetch(`${backendUrl}/psbt/${endpoint}`, {
-                    method: endpoint === 'health' ? 'GET' : 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: endpoint === 'health' ? null : JSON.stringify(testData)
-                });
-                
-                const result = await response.json();
-                const status = response.ok ? '✅' : '❌';
-                
-                const currentResult = document.getElementById('debugResult').textContent;
-                document.getElementById('debugResult').textContent = 
-                    currentResult + `\n${status} ${endpoint}: ${response.ok ? 'OK' : 'FAILED'}`;
-                    
-            } catch (error) {
-                const currentResult = document.getElementById('debugResult').textContent;
-                document.getElementById('debugResult').textContent = 
-                    currentResult + `\n❌ ${endpoint}: ERROR - ${error.message}`;
-            }
-        }
-
         function showCommonFixes() {
             const fixes = `🔧 Common Issues & Fixes:\n\n` +
-                `❌ "Sighash type not allowed"\n` +
-                `✅ Use Simple PSBT generation or Safe Mode signing\n\n` +
+                `❌ "Invalid Schnorr signature"\n` +
+                `✅ Regenerate PSBTs and re-sign with wallet\n` +
+                `✅ Ensure using OpenOrdex-compatible structure\n\n` +
+                `❌ "Can't modify signature"\n` +
+                `✅ This is fixed in the new code - seller signatures are copied, not modified\n\n` +
                 `❌ "User rejected request"\n` +
                 `✅ Click Sign in the Unisat popup\n\n` +
-                `❌ CORS errors\n` +
-                `✅ Ensure backend has CORS enabled\n\n` +
-                `❌ Wallet not detected\n` +
-                `✅ Use http://localhost, install Unisat extension\n\n` +
+                `❌ "Missing or spent UTXO"\n` +
+                `✅ Generate new buyer PSBT with fresh UTXOs\n\n` +
+                `❌ "No address or publickey to sign"\n` +
+                `✅ Ensure witnessUtxo is properly formatted in PSBT\n\n` +
                 `❌ Network mismatch\n` +
-                `✅ Switch Unisat to testnet`;
+                `✅ Switch Unisat to testnet using the button`;
             
             showResult('debugResult', fixes, 'info');
         }
@@ -986,28 +917,32 @@
         // Helper function to show results
         function showResult(elementId, message, type = 'info') {
             const element = document.getElementById(elementId);
-            element.textContent = message;
+            element.innerHTML = message;
             element.className = `result ${type}`;
+            element.style.display = 'block';
         }
 
         // Clear all fields
         function clearAll() {
-            // Clear all textareas and results
             const elements = document.querySelectorAll('textarea, .result');
             elements.forEach(el => {
                 if (el.className.includes('result')) {
-                    el.textContent = '';
+                    el.innerHTML = '';
+                    el.style.display = 'none';
                 } else {
                     el.value = '';
                 }
             });
+            showResult('debugResult', '✅ All fields cleared!', 'success');
         }
 
         // Load sample data
         function loadSampleData() {
-            // Sample data is already pre-loaded in the textareas
-            showResult('debugResult', '✅ Sample data loaded in all forms!', 'success');
+            showResult('debugResult', '✅ Sample data is pre-loaded in all forms!', 'success');
         }
     </script>
 </body>
 </html>
+
+<!-- 192,530 sats
+💎 Confirmed: 192,530 sats -->
