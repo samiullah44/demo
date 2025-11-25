@@ -1,5 +1,6 @@
 // models/Ordinal.js
 import mongoose from 'mongoose';
+import mongoosePaginate from 'mongoose-paginate-v2';
 
 const ordinalSchema = new mongoose.Schema({
   inscription_id: { 
@@ -66,9 +67,9 @@ const ordinalSchema = new mongoose.Schema({
     type: Number,
     min: [0, 'Value cannot be negative']
   },
-    price_btc: {
+  price_btc: {
     type: Number,
-    required: true,
+    default: 0, // Changed from required: true to default: 0
     min: 0
   },
   
@@ -103,6 +104,9 @@ const ordinalSchema = new mongoose.Schema({
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
+
+// Apply pagination plugin
+ordinalSchema.plugin(mongoosePaginate);
 
 // Indexes
 ordinalSchema.index({ inscription_id: 1, last_fetched: -1 });

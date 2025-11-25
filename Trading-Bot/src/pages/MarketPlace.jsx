@@ -307,7 +307,7 @@ const MarketPlace = () => {
                     alt={ordinal.name}
                     className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300"
                     onError={(e) => {
-                      e.target.src = `https://via.placeholder.com/300x300/1f2937/ffffff?text=Ordinal`;
+                      e.target.src = `https://picsum.photos/300/300?random=${Math.random()}`||`https://via.placeholder.com/300x300/1f2937/ffffff?text=Ordinal`;
                     }}
                   />
                   <div className="absolute top-3 left-3 flex items-center gap-1 px-2 py-1 bg-black/70 rounded-full">

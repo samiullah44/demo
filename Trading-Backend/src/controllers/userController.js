@@ -7,7 +7,7 @@ import { sendEmail } from "../utils/sendEmail.js";
 
 dotenv.config();
 
-const OTP_TTL_MS = 3 * 60 * 1000; // 5 minutes
+const OTP_TTL_MS = 3 * 60 * 1000; 
 
 /**
  * Helper: generate numeric 6-digit OTP as string
@@ -70,11 +70,10 @@ export const auth = async (req, res) => {
 
     // Store OTP in DB (ephemeral)
     await Otp.findOneAndUpdate(
-      { email: normalizedEmail },
-      { code, expiresAt, createdAt: new Date() },
-      { upsert: true, new: true }
-    );
-
+  { email: normalizedEmail },
+  { $set: { code, expiresAt, createdAt: new Date() } },
+  { upsert: true, new: true }
+);
      const html = `<p>Your TradePulse verification code is <strong>${code}</strong>. It expires in 3 minutes.</p>`;
     await sendEmail({
   to: normalizedEmail,
@@ -108,58 +107,87 @@ export const verifyOtpAndSignup = async (req, res) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    console.log(`🔍 Verifying OTP for: ${normalizedEmail}`); // Debug log
 
     // Check otp entry
     const otpEntry = await Otp.findOne({ email: normalizedEmail });
-    if (!otpEntry) return res.status(400).json({ message: "No OTP request found for this email." });
-
-    // Validate code + expiry
-    if (otpEntry.code !== String(code)) return res.status(400).json({ message: "Invalid OTP." });
-    if (otpEntry.expiresAt < new Date()) return res.status(400).json({ message: "OTP expired." });
-
-    // Create user
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
-      // Rare case: user created between OTP send and verify
-      return res.status(400).json({ message: "User already exists." });
+    console.log(`📋 OTP Entry found:`, otpEntry); // Debug log
+    
+    if (!otpEntry) {
+      console.log(`❌ No OTP request found for: ${normalizedEmail}`);
+      return res.status(400).json({ message: "No OTP request found for this email." });
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(password, salt);
+    // Validate code + expiry
+    if (otpEntry.code !== String(code)) {
+      console.log(`❌ Invalid OTP: expected ${otpEntry.code}, got ${code}`);
+      return res.status(400).json({ message: "Invalid OTP." });
+    }
+    
+    if (otpEntry.expiresAt < new Date()) {
+      console.log(`❌ OTP expired at: ${otpEntry.expiresAt}`);
+      return res.status(400).json({ message: "OTP expired." });
+    }
 
-    const newUser = new User({
-      username: name || normalizedEmail.split("@")[0],
-      email: normalizedEmail,
-      password: hashed,
-      created_at: Date.now(),
-    });
+    console.log(`✅ OTP validated successfully`); // Debug log
 
-    await newUser.save();
+    // DOUBLE CHECK if user exists (race condition protection)
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      console.log(`⚠️ User already exists during OTP verification: ${normalizedEmail}`);
+      // Clean up OTP
+      await Otp.deleteMany({ email: normalizedEmail });
+      return res.status(400).json({ message: "User already exists. Please login instead." });
+    }
 
-    // Remove OTP entry (cleanup)
-    await Otp.deleteMany({ email: normalizedEmail });
+    // Create user with error handling for race conditions
+    try {
+      // Hash password
+      const salt = await bcrypt.genSalt(10);
+      const hashed = await bcrypt.hash(password, salt);
 
-    // Issue token
-    const token = generateToken(newUser._id, res);
+      const newUser = new User({
+        username: name || normalizedEmail.split("@")[0],
+        email: normalizedEmail,
+        password: hashed,
+        created_at: Date.now(),
+      });
 
-    return res.status(201).json({
-      success: true,
-      isNewUser: true,
-      user: {
-        _id: newUser._id,
-        username: newUser.username,
-        email: newUser.email,
-      },
-      token,
-      message: "Signup complete",
-    });
+      await newUser.save();
+      console.log(`✅ New user created: ${normalizedEmail}`); // Debug log
+
+      // Remove OTP entry (cleanup)
+      await Otp.deleteMany({ email: normalizedEmail });
+      console.log(`🧹 OTP cleaned up for: ${normalizedEmail}`); // Debug log
+
+      // Issue token
+      const token = generateToken(newUser._id, res);
+
+      return res.status(201).json({
+        success: true,
+        isNewUser: true,
+        user: {
+          _id: newUser._id,
+          username: newUser.username,
+          email: newUser.email,
+        },
+        token,
+        message: "Signup complete",
+      });
+    } catch (userError) {
+      // Handle duplicate key error specifically
+      if (userError.code === 11000) {
+        console.log(`⚠️ Race condition: User created by another process`);
+        await Otp.deleteMany({ email: normalizedEmail });
+        return res.status(400).json({ message: "User already exists. Please login instead." });
+      }
+      throw userError; // Re-throw other errors
+    }
   } catch (err) {
-    console.error("Verify OTP error:", err);
+    console.error("❌ Verify OTP error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
- 
 export const logout = (req, res) => {
   try {
     res.cookie("jwt", "", { maxAge: 0 });

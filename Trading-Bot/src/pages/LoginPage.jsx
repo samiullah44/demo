@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, CheckCircle, Clock } from "lucide-react";
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  Clock,
+  Wallet,
+  X,
+  Shield,
+  Key,
+  Zap,
+  Gem,
+  TrendingUp,
+} from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/useAuthStore";
 import useWalletStore from "../store/useWalletStore";
@@ -11,9 +25,10 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [step, setStep] = useState("login"); // login → verify
+  const [step, setStep] = useState("login");
   const [otpTimer, setOtpTimer] = useState(0);
   const [error, setError] = useState("");
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -30,59 +45,48 @@ const LoginPage = () => {
   const { connected, address, walletType } = useWalletStore();
   const from = location.state?.from?.pathname || "/";
 
-  // --- Redirect Logic ---
+  // Redirect if logged in
   useEffect(() => {
-    if (authUser) {
-      console.log("User authenticated, redirecting to:", from);
-      navigate(from, { replace: true });
-    }
+    if (authUser) navigate(from, { replace: true });
   }, [authUser, navigate, from]);
 
-  // Handle wallet connection when on login page
+  // Wallet auto-login
   useEffect(() => {
     if (connected && address && walletType && !authUser) {
-      console.log("Wallet connected, setting user from wallet");
-      setUserFromWallet({
-        address,
-        walletType,
-      });
+      setUserFromWallet({ address, walletType });
     }
   }, [connected, address, walletType, authUser, setUserFromWallet]);
 
-  // --- OTP Timer ---
+  // OTP countdown
   useEffect(() => {
-    let timer;
+    let t;
     if (otpTimer > 0) {
-      timer = setInterval(() => setOtpTimer((t) => t - 1), 1000);
+      t = setInterval(() => setOtpTimer((x) => x - 1), 1000);
     }
-    return () => clearInterval(timer);
+    return () => clearInterval(t);
   }, [otpTimer]);
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs
-      .toString()
-      .padStart(2, "0")}`;
-  };
+  const formatTime = (sec) =>
+    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(
+      sec % 60
+    ).padStart(2, "0")}`;
 
-  // --- Handlers ---
   const handleEmailLogin = async (e) => {
     e.preventDefault();
     setError("");
     try {
+      console.log("Attempting login for:", email);
       const result = await auth({ email, password });
-
+      console.log("Login result:", result);
+      
       if (result.otp_sent) {
-        // Needs verification
         setStep("verify");
         setOtpTimer(180);
       } else {
-        // Logged in successfully - state is already set in the auth function
-        console.log("Email login successful, redirecting to:", from);
         navigate(from, { replace: true });
       }
     } catch (err) {
+      console.error("Login error:", err);
       setError(err.message);
     }
   };
@@ -91,220 +95,399 @@ const LoginPage = () => {
     e.preventDefault();
     setError("");
     try {
+      console.log("Verifying OTP:", otp);
       await verifyOtp({ email, password, code: otp });
-      console.log("OTP verification successful, redirecting to:", from);
       navigate(from, { replace: true });
     } catch (err) {
+      console.error("Verify OTP error:", err);
       setError(err.message);
     }
   };
 
   const handleResendOtp = async () => {
     try {
-      await auth({ email, password }); // re-trigger send
+      await auth({ email, password });
       setOtpTimer(180);
+      setError("");
     } catch (err) {
-      setError("Failed to resend OTP. Try again.");
+      setError("Failed to resend OTP");
     }
   };
 
-  // --- Motion Variants ---
-  const fadeIn = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 },
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.2 }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, x: 30 },
+    visible: {
+      opacity: 1,
+      x: 0,
+      transition: { type: "spring", stiffness: 30, damping: 15 }
+    }
+  };
+
+  const slideVariants = {
+    enter: (direction) => ({
+      x: direction > 0 ? 300 : -300,
+      opacity: 0
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      transition: { type: "spring", stiffness: 300, damping: 30 }
+    },
+    exit: (direction) => ({
+      x: direction > 0 ? -300 : 300,
+      opacity: 0,
+      transition: { duration: 0.2 }
+    })
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-black to-gray-900 px-4 pt-20">
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* -------------------- LEFT SIDE (Email Login) -------------------- */}
-        <motion.div
-          variants={fadeIn}
-          initial="hidden"
-          animate="visible"
-          className="bg-gray-800/60 backdrop-blur-md border border-cyan-400/20 rounded-2xl p-8 shadow-lg"
-        >
-          <h1 className="text-3xl font-bold text-white mb-2">
-            {step === "verify" ? "Verify Your Email" : "Welcome Back"}
-          </h1>
-          <p className="text-cyan-300 mb-8">
-            {step === "verify"
-              ? "Enter the verification code sent to your email"
-              : "Sign in to continue"}
-          </p>
+    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 px-4 pt-16">
+      {/* Animated Background Elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-amber-400/10 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl"></div>
+      </div>
 
-          <AnimatePresence mode="wait">
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10"
+      >
+        {/* LEFT SIDE - EMAIL LOGIN */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-slate-800/80 backdrop-blur-xl border border-purple-500/20 rounded-3xl shadow-2xl p-8 lg:p-10"
+        >
+          {/* Header */}
+          <motion.div variants={itemVariants} className="text-center mb-8">
+            <div className="flex items-center justify-center space-x-3 mb-4">
+              <div className="relative">
+                <motion.div
+                  whileHover={{ rotate: 360 }}
+                  transition={{ duration: 0.5 }}
+                >
+                  <Mail className="h-8 w-8 text-amber-400" />
+                </motion.div>
+              </div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-amber-400 to-purple-400 bg-clip-text text-transparent">
+                {step === "verify" ? "Verify Identity" : "Email Login"}
+              </h1>
+            </div>
+            <p className="text-purple-200/80 text-lg">
+              {step === "verify"
+                ? "Enter the 6-digit code sent to your email"
+                : "Secure access with email & password"}
+            </p>
+          </motion.div>
+
+          <AnimatePresence mode="wait" custom={step === "verify" ? 1 : -1}>
             {step === "login" ? (
               <motion.form
                 key="login"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
+                custom={-1}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
                 onSubmit={handleEmailLogin}
                 className="space-y-6"
               >
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                {/* Email Input */}
+                <motion.div variants={itemVariants}>
+                  <label className="block text-sm font-semibold mb-3 text-amber-300">
                     Email Address
                   </label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-3 h-5 w-5 text-cyan-400" />
+                    <Mail className="absolute left-4 top-3 h-5 w-5 text-purple-400" />
                     <input
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                      placeholder="Enter your email"
                       required
+                      className="input w-full pl-12 bg-slate-700/50 border-purple-500/30 text-white placeholder-purple-200/50 focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 rounded-xl"
+                      placeholder="your@email.com"
                     />
                   </div>
-                </div>
+                </motion.div>
 
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                {/* Password Input */}
+                <motion.div variants={itemVariants}>
+                  <label className="block text-sm font-semibold mb-3 text-amber-300">
                     Password
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-5 w-5 text-cyan-400" />
+                    <Lock className="absolute left-4 top-3 h-5 w-5 text-purple-400" />
                     <input
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-12 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                      placeholder="Enter your password"
                       required
+                      className="input w-full pl-12 pr-12 bg-slate-700/50 border-purple-500/30 text-white placeholder-purple-200/50 focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 rounded-xl"
+                      placeholder="Enter your password"
                     />
-                    <button
+                    <motion.button
                       type="button"
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-3 text-cyan-400"
+                      className="absolute right-3 top-3 text-purple-400 hover:text-amber-400 transition-colors"
                     >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
-                    </button>
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </motion.button>
                   </div>
-                </div>
+                </motion.div>
 
+                {/* Error Message */}
                 {error && (
-                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-sm">
-                    {error}
-                  </div>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="alert bg-red-500/20 border border-red-500/30 text-red-200 rounded-xl"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <X className="h-4 w-4" />
+                      <span>{error}</span>
+                    </div>
+                  </motion.div>
                 )}
 
-                <button
+                {/* Submit Button */}
+                <motion.button
+                  variants={itemVariants}
                   type="submit"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="btn w-full bg-gradient-to-r from-amber-500 to-amber-600 border-0 text-white shadow-lg shadow-amber-500/25 hover:from-amber-600 hover:to-amber-700 rounded-xl py-3 text-lg font-semibold transition-all duration-300"
                   disabled={isLogingIng}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-md"
                 >
-                  {isLogingIng ? "Signing In..." : "Continue"}
-                </button>
+                  {isLogingIng ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="h-5 w-5 border-2 border-white border-t-transparent rounded-full"
+                    />
+                  ) : (
+                    <span className="flex items-center justify-center space-x-2">
+                      <Key className="h-5 w-5" />
+                      <span>Continue with Email</span>
+                    </span>
+                  )}
+                </motion.button>
               </motion.form>
             ) : (
               <motion.form
                 key="verify"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
+                custom={1}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
                 onSubmit={handleVerifyOtp}
                 className="space-y-6"
               >
-                <div>
-                  <label className="block text-sm font-medium text-cyan-300 mb-2">
+                {/* OTP Input */}
+                <motion.div variants={itemVariants}>
+                  <label className="block text-sm font-semibold mb-3 text-amber-300">
                     Verification Code
                   </label>
-                  <input
-                    type="text"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-700/50 border border-cyan-400/20 rounded-xl text-white text-center text-2xl tracking-widest placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                    placeholder="000000"
-                    maxLength={6}
-                    required
-                  />
-                </div>
+                  <div className="relative">
+                    <Shield className="absolute left-4 top-3 h-5 w-5 text-purple-400" />
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="input w-full pl-12 text-center text-2xl tracking-widest font-mono bg-slate-700/50 border-purple-500/30 text-white focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 rounded-xl"
+                      placeholder="000000"
+                    />
+                  </div>
+                </motion.div>
 
                 {/* Timer */}
-                <div className="text-center text-sm text-yellow-400">
+                <motion.div variants={itemVariants} className="text-center">
                   {otpTimer > 0 ? (
-                    <p className="flex justify-center items-center gap-1">
-                      <Clock className="h-4 w-4" /> Code expires in{" "}
-                      {formatTime(otpTimer)}
-                    </p>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleResendOtp}
-                      className="text-red-400 hover:text-red-300 font-medium"
+                    <motion.p 
+                      initial={{ scale: 0.9 }}
+                      animate={{ scale: 1 }}
+                      className="flex justify-center items-center gap-2 text-amber-300 font-medium"
                     >
-                      Resend Code
-                    </button>
+                      <Clock className="h-4 w-4" />
+                      Code expires in {formatTime(otpTimer)}
+                    </motion.p>
+                  ) : (
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="text-amber-400 hover:text-amber-300 font-semibold transition-colors"
+                      onClick={handleResendOtp}
+                    >
+                      Resend Verification Code
+                    </motion.button>
                   )}
-                </div>
+                </motion.div>
 
+                {/* Error Message */}
                 {error && (
-                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-sm">
-                    {error}
-                  </div>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="alert bg-red-500/20 border border-red-500/30 text-red-200 rounded-xl"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <X className="h-4 w-4" />
+                      <span>{error}</span>
+                    </div>
+                  </motion.div>
                 )}
 
-                <button
+                {/* Verify Button */}
+                <motion.button
+                  variants={itemVariants}
                   type="submit"
-                  disabled={isSigningUp || otpTimer === 0}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-md"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  disabled={otpTimer === 0 || otp.length !== 6}
+                  className="btn w-full bg-gradient-to-r from-green-500 to-emerald-600 border-0 text-white shadow-lg shadow-green-500/25 hover:from-green-600 hover:to-emerald-700 rounded-xl py-3 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
                 >
-                  {isSigningUp ? "Verifying..." : "Verify & Continue"}
-                </button>
+                  {isSigningUp ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="h-5 w-5 border-2 border-white border-t-transparent rounded-full"
+                    />
+                  ) : (
+                    <span className="flex items-center justify-center space-x-2">
+                      <CheckCircle className="h-5 w-5" />
+                      <span>Verify & Continue</span>
+                    </span>
+                  )}
+                </motion.button>
 
-                <button
+                {/* Back Button */}
+                <motion.button
+                  variants={itemVariants}
                   type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setStep("login")}
-                  className="w-full text-cyan-400 hover:text-cyan-300 mt-2 text-sm"
+                  className="btn btn-ghost w-full text-purple-300 hover:text-white hover:bg-purple-500/20 rounded-xl py-3 transition-all duration-300"
                 >
                   ← Back to Login
-                </button>
+                </motion.button>
               </motion.form>
             )}
           </AnimatePresence>
         </motion.div>
 
-        {/* -------------------- RIGHT SIDE (Wallet Connect) -------------------- */}
+        {/* RIGHT SIDE - WALLET LOGIN */}
         <motion.div
-          variants={fadeIn}
-          initial="hidden"
-          animate="visible"
-          transition={{ delay: 0.2 }}
-          className="bg-gray-800/60 backdrop-blur-md border border-purple-400/20 rounded-2xl p-8 shadow-lg flex flex-col justify-between"
+          variants={itemVariants}
+          transition={{ delay: 0.3 }}
+          className="bg-slate-800/80 backdrop-blur-xl border border-cyan-500/20 rounded-3xl shadow-2xl p-8 lg:p-10 flex flex-col justify-center text-center relative overflow-hidden"
         >
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-2 text-center">
-              Connect Wallet
-            </h2>
-            <p className="text-purple-300 text-center mb-8">
-              Secure login using your crypto wallet
-            </p>
-
-            <div className="max-w-sm mx-auto w-full">
-              <WalletConnect showAsLogin={true} />
+          {/* Header */}
+          <motion.div variants={itemVariants} className="relative z-10">
+            <div className="flex items-center justify-center space-x-3 mb-4">
+              <motion.div whileHover={{ scale: 1.1, rotate: 10 }} className="relative">
+                <Wallet className="h-10 w-10 text-cyan-400" />
+              </motion.div>
+              <h2 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                Wallet Login
+              </h2>
             </div>
-          </div>
+            <p className="text-cyan-200/80 text-lg mb-2">
+              Instant access with your wallet
+            </p>
+            <p className="text-sm mb-8 text-cyan-300/60">
+              No passwords, no emails - just connect and go
+            </p>
+          </motion.div>
 
-          <div className="text-center text-gray-400 text-sm border-t border-purple-400/20 pt-6 mt-8">
-            By connecting your wallet, you agree to our{" "}
-            <a href="#" className="text-cyan-400 hover:text-cyan-300">
-              Terms of Service
-            </a>{" "}
-            and{" "}
-            <a href="#" className="text-cyan-400 hover:text-cyan-300">
-              Privacy Policy
-            </a>
-          </div>
+          {/* Connect Wallet Button */}
+          <motion.button
+            variants={itemVariants}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setWalletModalOpen(true)}
+            className="btn bg-gradient-to-r from-cyan-500 to-blue-600 border-0 text-white shadow-lg shadow-cyan-500/25 hover:from-cyan-600 hover:to-blue-700 rounded-xl py-4 text-lg font-semibold relative z-10 transition-all duration-300 mb-8"
+          >
+            <Wallet className="h-5 w-5 mr-2" />
+            Connect Wallet
+          </motion.button>
+
+          {/* Benefits */}
+          <motion.div variants={itemVariants} className="space-y-4 text-left">
+            {[
+              { icon: Zap, text: "Lightning-fast access", color: "text-yellow-400" },
+              { icon: Shield, text: "Enhanced security", color: "text-green-400" },
+              { icon: TrendingUp, text: "Direct marketplace integration", color: "text-cyan-400" },
+              { icon: Gem, text: "Exclusive wallet holder features", color: "text-purple-400" }
+            ].map((item, index) => (
+              <motion.div
+                key={item.text}
+                variants={itemVariants}
+                custom={index}
+                className="flex items-center space-x-3 p-3 rounded-xl bg-slate-700/30 border border-slate-600/30"
+              >
+                <item.icon className={`h-5 w-5 ${item.color}`} />
+                <span className="text-cyan-100 text-sm">{item.text}</span>
+              </motion.div>
+            ))}
+          </motion.div>
         </motion.div>
-      </div>
+      </motion.div>
+
+      {/* FIXED Wallet Modal */}
+      <AnimatePresence>
+        {walletModalOpen && (
+          <motion.div
+            className="fixed inset-0 flex items-center justify-center z-50 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            {/* Backdrop - FIXED: Now closes modal when clicked */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setWalletModalOpen(false)}
+            />
+            
+            {/* Modal Content */}
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-slate-800 rounded-3xl shadow-2xl max-w-md w-full border border-cyan-500/20 z-50"
+            >
+              {/* Close Button */}
+              <button
+                onClick={() => setWalletModalOpen(false)}
+                className="absolute top-4 right-4 text-cyan-300 hover:text-white z-10"
+              >
+                <X className="h-6 w-6" />
+              </button>
+              <WalletConnect 
+                showAsLogin={true} 
+                onClose={() => setWalletModalOpen(false)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

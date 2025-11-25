@@ -305,23 +305,36 @@ export const getAllOrdinals = async (req, res) => {
       filter.is_listed = false;
     }
 
-    const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { [sort]: order === 'desc' ? -1 : 1 },
-      populate: 'collection'
-    };
+    // Calculate pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+    
+    // Sort configuration
+    const sortConfig = { [sort]: order === 'desc' ? -1 : 1 };
 
-    const ordinals = await Ordinal.paginate(filter, options);
+    // Execute queries in parallel - REMOVED POPULATE
+    const [ordinals, total] = await Promise.all([
+      Ordinal.find(filter)
+        .sort(sortConfig)
+        .skip(skip)
+        .limit(limitNum)
+        .lean(), // Use lean() for better performance
+      Ordinal.countDocuments(filter)
+    ]);
+
+    const pages = Math.ceil(total / limitNum);
     
     res.json({
       success: true,
-      data: ordinals.docs,
+      data: ordinals,
       pagination: {
-        page: ordinals.page,
-        limit: ordinals.limit,
-        total: ordinals.total,
-        pages: ordinals.pages
+        page: pageNum,
+        limit: limitNum,
+        total: total,
+        pages: pages,
+        hasNext: pageNum < pages,
+        hasPrev: pageNum > 1
       }
     });
   } catch (error) {
@@ -332,7 +345,6 @@ export const getAllOrdinals = async (req, res) => {
     });
   }
 };
-
 /**
  * Force refresh an ordinal
  */

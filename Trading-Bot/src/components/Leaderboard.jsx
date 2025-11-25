@@ -803,7 +803,7 @@ const Leaderboard = () => {
 
   return (
     <motion.div 
-      className="min-h-screen bg-gradient-to-br from-gray-900 to-black py-8 px-4 sm:px-6 lg:px-8"
+      className="min-h-screen bg-gradient-to-br from-gray-900 to-black px-4 sm:px-6 lg:px-8 md:pt-24"
       initial="initial"
       animate="in"
       exit="out"
