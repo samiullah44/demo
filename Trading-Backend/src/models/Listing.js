@@ -14,11 +14,13 @@ const listingSchema = new mongoose.Schema({
     index: true
   },
   
-  // Inscription details
+  // Inscription details - FIXED: Added unique constraint
   inscription_id: {
     type: String,
     required: true,
-    index: true
+    index: true,
+    // Add compound unique index for inscription_id + status
+    // This allows multiple listings for same inscription if they're cancelled/sold
   },
   inscription_number: {
     type: String,
@@ -63,6 +65,16 @@ const listingSchema = new mongoose.Schema({
     required: true
   },
   
+  // PSBT status tracking
+  psbt_status: {
+    is_partially_signed: Boolean,
+    is_fully_signed: Boolean,
+    can_finalize: Boolean,
+    signature_count: Number,
+    total_inputs: Number,
+    finalization_ready: Boolean
+  },
+  
   // Status
   status: {
     type: String,
@@ -103,7 +115,16 @@ const listingSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes
+// CRITICAL: Compound unique index - only one active listing per inscription
+listingSchema.index(
+  { inscription_id: 1, status: 1 }, 
+  { 
+    unique: true, 
+    partialFilterExpression: { status: 'active' } 
+  }
+);
+
+// Other indexes
 listingSchema.index({ status: 1, price_btc: 1 });
 listingSchema.index({ status: 1, createdAt: -1 });
 listingSchema.index({ seller_address: 1, status: 1 });

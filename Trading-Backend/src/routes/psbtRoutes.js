@@ -10,7 +10,8 @@ import {
   decodePSBT,
   signPSBTWithWallet,
   verifySignedPSBT,
-  broadcastTransaction,combinePSBTController
+  broadcastTransaction,
+  emergencyIndexCleanup
 } from '../controllers/psbtController.js';
 import {
   signDummyUtxoPSBT,
@@ -84,6 +85,23 @@ router.post('/generate-seller-simple', generateSellerPSBTSimple);
  *   network?: 'testnet' | 'mainnet'
  * }
  */
+// Add emergency route
+router.post('/emergency-cleanup', async (req, res) => {
+  try {
+    const result = await emergencyIndexCleanup();
+    res.json({
+      success: true,
+      message: 'Emergency cleanup completed',
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Emergency cleanup failed',
+      message: error.message
+    });
+  }
+});
 router.post('/create-listing', (req, res, next) => {
   // Add the isForListing option
   req.isForListing = true;
@@ -171,7 +189,6 @@ router.post('/generate-dummy-utxo', generateDummyUtxo);
  */
 router.post('/generate-buyer', generateBuyerPSBT);
 
-router.post('/combine-psbt',combinePSBTController)
 // ============================================================================
 // VERIFICATION & VALIDATION
 // ============================================================================

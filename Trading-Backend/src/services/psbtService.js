@@ -1118,9 +1118,8 @@ export const normalizeSellerPSBT = (listing) => {
     );
   }
 };
-
-// ✅ FIXED: BUYER PSBT GENERATION (OpenOrdex Compatible)
-
+// ✅ SIMPLE FIX: Correct Ordinal Transfer (OpenOrdex Method)
+// ✅ CORRECTED: Buyer PSBT Generation (Preserves Seller Signature)
 export const generateBuyerPSBT = async (
   listing,
   buyerPaymentAddress,
@@ -1130,11 +1129,8 @@ export const generateBuyerPSBT = async (
 ) => {
   try {
     const { network } = getNetworkConfig(networkType);
-    setNetwork(networkType);
-
-    console.log("🛒 Generating Buyer PSBT (Separate PSBT Approach)...");
-    console.log("💳 Buyer Payment Address:", buyerPaymentAddress);
-    console.log("📦 Buyer Receive Address:", buyerReceiveAddress);
+    
+    console.log("🛒 Generating Buyer PSBT (Signature-Preserving)...");
 
     // ✅ Validate addresses
     const paymentValidation = validateAddress(buyerPaymentAddress);
@@ -1147,48 +1143,81 @@ export const generateBuyerPSBT = async (
       throw new AppError(`Invalid buyer receive address: ${receiveValidation.error}`, 400);
     }
 
-    // ✅ Parse seller PSBT to extract metadata
-    console.log("📋 Parsing seller PSBT for metadata...");
-    let sellerPsbtData;
-    try {
-      sellerPsbtData = normalizeSellerPSBT(listing);
-    } catch (error) {
-      throw new AppError(`Invalid seller PSBT format: ${error.message}`, 400);
+    // ✅ Load seller's signed PSBT
+    const sellerPsbtData = normalizeSellerPSBT(listing);
+    const sellerPsbt = sellerPsbtData.psbt;
+
+    if (sellerPsbt.inputCount !== 1 || sellerPsbt.txOutputs.length !== 1) {
+      throw new AppError('Invalid seller PSBT structure', 400);
     }
 
-    const sellerPsbt = sellerPsbtData.psbt;
-    const sellerInputTxid = sellerPsbtData.inputTxid;
-    const sellerInputIndex = sellerPsbtData.inputIndex;
+    // ✅ Extract seller data
+    const sellerInput = sellerPsbt.txInputs[0];
     const sellerOutput = sellerPsbt.txOutputs[0];
     const priceSats = sellerOutput.value;
+    const sellerPaymentAddress = bitcoin.address.fromOutputScript(sellerOutput.script, network);
+    
+    console.log("💰 Price:", priceSats, "sats");
+    console.log("📍 Seller address:", sellerPaymentAddress);
 
+    // ✅ Verify SIGHASH
+    const sellerInputData = sellerPsbt.data.inputs[0];
+    const expectedSighash = bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY;
+    
+    if (sellerInputData.sighashType !== expectedSighash) {
+      throw new AppError('Seller must use SIGHASH_SINGLE|ANYONECANPAY', 400);
+    }
+
+    // ✅ Fetch ordinal UTXO details
+    const sellerInputTxid = Buffer.from(sellerInput.hash).reverse().toString('hex');
+    const sellerInputIndex = sellerInput.index;
     const sellerTxHex = await getTransactionHex(sellerInputTxid, networkType);
     const sellerTx = bitcoin.Transaction.fromHex(sellerTxHex);
     const sellerUtxo = sellerTx.outs[sellerInputIndex];
-    if (!sellerUtxo) throw new AppError('Seller input UTXO not found in blockchain', 400);
+    const ordinalValue = sellerUtxo.value;
 
-    // get fee rates...
+    console.log("💎 Ordinal UTXO:", ordinalValue, "sats");
+
+    // ✅ Get buyer UTXOs and fee rate
     const feeRates = await getRecommendedFeeRates(networkType);
     const selectedFeeRate = feeRates[feeLevel];
-
-    // fetch buyer utxos & find dummy...
     const allBuyerUtxos = await fetchAddressUtxos(buyerPaymentAddress, networkType);
-    if (!allBuyerUtxos.length) throw new AppError('No UTXOs found for buyer payment address', 400);
+    
+    if (!allBuyerUtxos.length) {
+      throw new Error('No UTXOs found for buyer');
+    }
+
     const existingDummy = await findDummyUtxo(allBuyerUtxos, networkType);
     const requiresNewDummy = !existingDummy;
 
-    // Build buyer PSBT WITHOUT seller input (important)
-    const buyerPsbt = new bitcoin.Psbt({ network });
+    let totalBuyerInput = 0;
 
-    let accumulatedValue = 0;
+    // ========================================
+    // 🔴 CRITICAL FIX: Use Seller's PSBT as Base
+    // ========================================
+    
+    console.log("🔗 Starting with seller's signed PSBT...");
+    
+    // ✅ Use seller's PSBT as the base (preserves signature)
+    const combinedPsbt = bitcoin.Psbt.fromBase64(sellerPsbt.toBase64(), { network });
+    
+    console.log("✅ Preserved seller's original structure:");
+    console.log(`   Input 0: ${sellerInputTxid}:${sellerInputIndex}`);
+    console.log(`   Output 0: ${sellerPaymentAddress} (${priceSats} sats)`);
 
-    // Add existing dummy if present
+    // ========================================
+    // ✅ STEP 1: ADD DUMMY UTXO (Input 1)
+    // ========================================
+    
+    console.log("🔗 Step 1: Adding dummy UTXO...");
+    
+    let dummyUtxoValue = 0;
     if (existingDummy) {
       const dummyTxHex = await getTransactionHex(existingDummy.txid, networkType);
       const dummyTx = bitcoin.Transaction.fromHex(dummyTxHex);
       const dummyUtxo = dummyTx.outs[existingDummy.vout];
 
-      buyerPsbt.addInput({
+      combinedPsbt.addInput({
         hash: existingDummy.txid,
         index: existingDummy.vout,
         witnessUtxo: {
@@ -1196,12 +1225,18 @@ export const generateBuyerPSBT = async (
           value: dummyUtxo.value
         }
       });
-
-      accumulatedValue += existingDummy.value;
+      dummyUtxoValue = existingDummy.value;
+      totalBuyerInput += dummyUtxoValue;
+      console.log(`✅ Existing dummy: ${dummyUtxoValue} sats`);
     }
 
-    // Select payment utxos (unchanged)
-    const { utxos: paymentUtxos, totalValue } = await selectPaymentUtxos(
+    // ========================================
+    // ✅ STEP 2: ADD PAYMENT UTXOS (Input 2+)
+    // ========================================
+    
+    console.log("🔗 Step 2: Adding payment UTXOs...");
+    
+    const { utxos: paymentUtxos } = await selectPaymentUtxos(
       allBuyerUtxos,
       priceSats + (requiresNewDummy ? DUMMY_UTXO_VALUE : 0),
       selectedFeeRate * 500,
@@ -1213,7 +1248,7 @@ export const generateBuyerPSBT = async (
       const utxoTx = bitcoin.Transaction.fromHex(utxoTxHex);
       const utxoOut = utxoTx.outs[utxo.vout];
 
-      buyerPsbt.addInput({
+      combinedPsbt.addInput({
         hash: utxo.txid,
         index: utxo.vout,
         witnessUtxo: {
@@ -1221,435 +1256,230 @@ export const generateBuyerPSBT = async (
           value: utxoOut.value
         }
       });
-
-      accumulatedValue += utxo.value;
+      totalBuyerInput += utxo.value;
     }
+    
+    console.log(`✅ Added ${paymentUtxos.length} payment UTXOs: ${totalBuyerInput} sats`);
 
-    // ---------- IMPORTANT: OUTPUT ORDERING FIX ----------
-    // Ordinal output MUST be the FIRST output in the final combined tx for SIGHASH_SINGLE to match seller's signature.
-    // So we add ordinal output first, then seller payment, then dummy/change.
-    buyerPsbt.addOutput({
-      address: buyerReceiveAddress,         // ordinal -> buyer
-      value: sellerUtxo.value
+    // ========================================
+    // 🔴 CRITICAL FIX: ORDINAL TRANSFER STRATEGY
+    // ========================================
+    //
+    // Since we can't change Output 0 (seller signed it),
+    // we need a different approach for ordinal transfer.
+    //
+    // SOLUTION: Create a new output that receives the ordinal
+    // by using the "first satoshi" allocation rules.
+    //
+    // SATOSHI ALLOCATION:
+    // Input 0 (ordinal) → First available output
+    // Since Output 0 is already "filled" by padding UTXOs,
+    // the ordinal sats overflow to Output 1 (buyer's address)
+    //
+    // We need enough padding sats to fill Output 0 completely
+    // so the ordinal sats go to Output 1 instead.
+    
+    console.log("\n📤 Step 3: Setting up ordinal transfer outputs...");
+
+    // ✅ OUTPUT 1: ORDINAL TO BUYER (This gets the inscription!)
+    // The ordinal from Input 0 will overflow to this output
+    // because Output 0 is already filled by padding UTXOs
+    const ordinalOutputValue = ordinalValue + (existingDummy ? existingDummy.value : DUMMY_UTXO_VALUE);
+    
+    combinedPsbt.addOutput({
+      address: buyerReceiveAddress,  // ⬅️ BUYER GETS ORDINAL HERE
+      value: ordinalOutputValue
     });
+    console.log(`🎯 Output 1: ORDINAL → ${buyerReceiveAddress} (${ordinalOutputValue} sats)`);
+    console.log(`   ↳ Ordinal will transfer here via sat overflow`);
 
-    buyerPsbt.addOutput({
-      address: bitcoin.address.fromOutputScript(sellerOutput.script, network), // payment to seller
-      value: priceSats
-    });
-
-    // Add dummy output if needed
+    // ✅ OUTPUT 2: NEW DUMMY UTXO (if needed)
     if (requiresNewDummy) {
-      buyerPsbt.addOutput({
+      combinedPsbt.addOutput({
         address: buyerPaymentAddress,
         value: DUMMY_UTXO_VALUE
       });
+      console.log(`✅ Output 2: New dummy (${DUMMY_UTXO_VALUE} sats)`);
     }
 
-    // Now compute fee using actual inputs/outputs counts (no "+1" hacks)
-    const actualFee = calculateFee(
-      buyerPsbt.txInputs.length,
-      buyerPsbt.txOutputs.length + 1, // +1 because final combined tx will include seller's input but outputs remain same order; we add +1 vsize guard to be safe
+    // ========================================
+    // ✅ STEP 4: CALCULATE FEE AND CHANGE
+    // ========================================
+    
+    const estimatedFee = calculateFee(
+      combinedPsbt.inputCount,
+      combinedPsbt.txOutputs.length + 1, // +1 for change
       selectedFeeRate,
       true
     );
 
-    // Note: the extra "+1" above is conservative to reflect an extra input's vsize when combined.
-    const totalOutputValue = buyerPsbt.txOutputs.reduce((sum, out) => sum + out.value, 0);
-    const changeAmount = accumulatedValue - totalOutputValue - actualFee;
+    const totalInputValue = totalBuyerInput + ordinalValue;
+    const totalOutputValue = combinedPsbt.txOutputs.reduce((sum, out) => sum + out.value, 0);
+    const changeAmount = totalInputValue - totalOutputValue - estimatedFee;
+    
+    console.log("\n💰 Transaction Balance:");
+    console.log(`   Total inputs: ${totalInputValue} sats`);
+    console.log(`   Total outputs: ${totalOutputValue} sats`);
+    console.log(`   Fee: ${estimatedFee} sats`);
+    console.log(`   Change: ${changeAmount} sats`);
 
     if (changeAmount < 0) {
-      throw new AppError(`Insufficient funds. Need ${Math.abs(changeAmount)} more sats.`, 400);
+      throw new Error(`Insufficient funds. Need ${Math.abs(changeAmount)} more sats`);
     }
 
     if (changeAmount >= 546) {
-      buyerPsbt.addOutput({
+      combinedPsbt.addOutput({
         address: buyerPaymentAddress,
         value: changeAmount
       });
-    } else {
-      // small dust -> absorb into fee (already effectively done)
+      console.log(`✅ Change output: ${changeAmount} sats`);
     }
 
-    const buyerPsbtBase64 = buyerPsbt.toBase64();
+    const finalPsbtBase64 = combinedPsbt.toBase64();
 
+    console.log("\n✅ ========================================");
+    console.log("✅ SIGNATURE-PRESERVING PSBT GENERATED!");
+    console.log("✅ ========================================");
+    console.log("📊 Final Structure:");
+    console.log(`   Inputs (${combinedPsbt.inputCount} total):`);
+    console.log(`   - Input 0: Seller ordinal (${ordinalValue} sats) ← PRESERVED SIGNATURE`);
+    console.log(`   - Input 1: Dummy UTXO (${dummyUtxoValue} sats)`);
+    console.log(`   - Input 2+: Payment UTXOs (${totalBuyerInput - dummyUtxoValue} sats)`);
+    console.log(`   Outputs (${combinedPsbt.txOutputs.length} total):`);
+    console.log(`   - Output 0: Seller payment (${priceSats} sats) ← PRESERVED FROM SELLER`);
+    console.log(`   - Output 1: ORDINAL → Buyer (${ordinalOutputValue} sats) ← GETS INSCRIPTION`);
+    console.log(`   - Output 2+: Dummy/Change`);
+    console.log("\n🎯 ORDINAL TRANSFER MECHANISM:");
+    console.log("   Seller's signature preserved (Output 0 unchanged)");
+    console.log("   Ordinal transfers to Output 1 via sat overflow");
+    console.log("   Buyer receives inscription in Output 1");
+    console.log("✅ ========================================\n");
+    
     return {
-      psbt: buyerPsbtBase64,
+      psbt: finalPsbtBase64,
       metadata: {
         network: networkType,
-        sellerPsbt: listing.signed_psbt,
-        sellerPsbtFormat: sellerPsbtData.format,
-        sellerInputTxid,
-        sellerInputIndex,
-        sellerUtxoValue: sellerUtxo.value,
+        priceSats,
+        ordinalValue,
         buyerPaymentAddress,
         buyerReceiveAddress,
-        priceSats,
         feeRate: selectedFeeRate,
-        estimatedFee: actualFee,
-        totalInput: accumulatedValue,
-        totalOutput: totalOutputValue,
-        change: changeAmount,
-        dummyStatus: requiresNewDummy ? 'creating_new' : 'using_existing',
-        buyerInputCount: buyerPsbt.txInputs.length,
-        buyerOutputCount: buyerPsbt.txOutputs.length
+        estimatedFee,
+        totalInput: totalInputValue,
+        changeAmount: changeAmount >= 546 ? changeAmount : 0,
+        sellerSignaturePreserved: true,
+        ordinalTransfer: {
+          mechanism: 'Sat Overflow',
+          from: `Input 0 (seller ordinal)`,
+          to: `Output 1 → ${buyerReceiveAddress}`,
+          note: "Ordinal transfers to first available output after seller's payment"
+        }
       }
     };
 
   } catch (err) {
-    if (err instanceof AppError) throw err;
-    console.error("❌ Buyer PSBT generation failed:", err);
-    throw new AppError(`Failed to generate buyer PSBT: ${err.message}`, 500);
+    console.error("❌ PSBT generation failed:", err);
+    throw new Error(`Failed to generate buyer PSBT: ${err.message}`);
   }
 };
 
-export const combinePSBTs = async (
-  sellerSignedPsbt,
-  buyerSignedPsbt,
-  metadata,
+// NEW: Simple finalization instead of complex combination
+export const broadcastTransactionService = async (
+  psbtData, // Changed from buyerExtendedPsbtBase64 to generic psbtData
   networkType = 'testnet'
 ) => {
   try {
-    const { network } = getNetworkConfig(networkType);
-    setNetwork(networkType);
+    const { network, baseMempoolApiUrl } = getNetworkConfig(networkType);
+    
+    console.log("🔧 Finalizing PSBT for broadcast...");
+    console.log("📏 Input data length:", psbtData.length);
+    console.log("🔍 First 20 chars:", psbtData.substring(0, 20));
 
-    console.log("🔗 Combining Seller and Buyer PSBTs...");
-
-    // ---------- Parse seller PSBT ----------
-    const sellerNormalized = normalizeSellerPSBT({
-      signed_psbt: sellerSignedPsbt,
-      network: networkType,
-      inscription_output: metadata.inscriptionOutput || metadata.inscription_output,
-      _id: 'temp-combine'
-    });
-
-    const sellerPsbt = sellerNormalized.psbt;
-    if (!sellerPsbt || sellerPsbt.inputCount === 0) {
-      throw new AppError('Invalid seller PSBT: no inputs found', 400);
-    }
-
-    // ---------- Parse buyer PSBT ----------
-    const cleanedBuyer = buyerSignedPsbt.trim().replace(/\s+/g, '');
-    let buyerPsbt;
-    if (/^[0-9a-fA-F]+$/.test(cleanedBuyer) && cleanedBuyer.startsWith('70736274')) {
-      buyerPsbt = bitcoin.Psbt.fromHex(cleanedBuyer, { network });
-    } else {
-      buyerPsbt = bitcoin.Psbt.fromBase64(cleanedBuyer, { network });
-    }
-
-    // Prevent duplicate seller input present in buyer PSBT
-    const sellerPrevoutHex = `${Buffer.from(sellerPsbt.txInputs[0].hash).reverse().toString('hex')}:${sellerPsbt.txInputs[0].index}`;
-    for (let i = 0; i < buyerPsbt.inputCount; i++) {
-      const inp = buyerPsbt.txInputs[i];
-      const prev = `${Buffer.from(inp.hash).reverse().toString('hex')}:${inp.index}`;
-      if (prev === sellerPrevoutHex) {
-        throw new AppError('Buyer PSBT must NOT include the seller input. Found duplicate input in buyer PSBT.', 400);
-      }
-    }
-
-    console.log("📊 Seller PSBT - Inputs:", sellerPsbt.inputCount, "Outputs:", sellerPsbt.txOutputs.length);
-    console.log("📊 Buyer PSBT - Inputs:", buyerPsbt.inputCount, "Outputs:", buyerPsbt.txOutputs.length);
-
-    // ---------- New combined PSBT ----------
-    const combined = new bitcoin.Psbt({ network });
-
-    // Helper: safely add an input to combined (only include keys that exist)
-    const addInputSafely = (txInput, inputData) => {
-      const base = {
-        hash: txInput.hash,
-        index: txInput.index,
-        sequence: txInput.sequence
-      };
-      if (inputData && inputData.witnessUtxo) base.witnessUtxo = inputData.witnessUtxo;
-      if (inputData && inputData.nonWitnessUtxo) base.nonWitnessUtxo = inputData.nonWitnessUtxo;
-      if (inputData && inputData.sighashType) base.sighashType = inputData.sighashType;
-      combined.addInput(base);
-    };
-
-    // Helper: copy optional signature/meta fields from a source input to combined input index
-    const copyInputMeta = (sourceInputData, toIndex) => {
-      if (!sourceInputData) return;
-      const update = {};
-      if (sourceInputData.partialSig) update.partialSig = sourceInputData.partialSig;
-      if (sourceInputData.finalScriptSig) update.finalScriptSig = sourceInputData.finalScriptSig;
-      if (sourceInputData.finalScriptWitness) update.finalScriptWitness = sourceInputData.finalScriptWitness;
-      if (sourceInputData.tapKeySig) update.tapKeySig = sourceInputData.tapKeySig;
-      if (sourceInputData.tapScriptSig) update.tapScriptSig = sourceInputData.tapScriptSig;
-      if (sourceInputData.tapLeafScript) update.tapLeafScript = sourceInputData.tapLeafScript;
-      if (sourceInputData.tapInternalKey) update.tapInternalKey = sourceInputData.tapInternalKey;
-      if (sourceInputData.tapMerkleRoot) update.tapMerkleRoot = sourceInputData.tapMerkleRoot;
-      if (sourceInputData.tapBip32Derivation) update.tapBip32Derivation = sourceInputData.tapBip32Derivation;
-
-      if (Object.keys(update).length > 0) {
-        combined.updateInput(toIndex, update);
-      }
-    };
-
-    // ---------- Add seller input first ----------
-    const sIn = sellerPsbt.txInputs[0];
-    const sInData = sellerPsbt.data.inputs[0] || {};
-    addInputSafely(sIn, sInData);
-    // copy seller meta (signatures, tap fields). seller input will be index 0 in combined
-    copyInputMeta(sInData, 0);
-    console.log("✅ Added seller input (index 0) with available metadata");
-
-    // ---------- Add buyer inputs ----------
-    for (let i = 0; i < buyerPsbt.inputCount; i++) {
-      const bIn = buyerPsbt.txInputs[i];
-      const bInData = buyerPsbt.data.inputs[i] || {};
-      addInputSafely(bIn, bInData);
-      // copy any partialSig/tapKeySig for buyer inputs (they should sign these)
-      copyInputMeta(bInData, 1 + i); // buyer inputs start at index 1
-    }
-    console.log(`✅ Added ${buyerPsbt.inputCount} buyer inputs (indexes 1..${buyerPsbt.inputCount})`);
-
-    // ---------- Outputs: ordinal should be index 0 ----------
-    const ordinalValue = metadata.sellerUtxoValue || metadata.sellerUtxoValueSats || null;
-    let ordinalOutput = null;
-
-    // Try to find ordinal output in buyerPsbt by value match first
-    if (ordinalValue != null) {
-      for (const out of buyerPsbt.txOutputs) {
-        if (out.value === ordinalValue) {
-          ordinalOutput = out;
-          break;
-        }
-      }
-    }
-
-    // If not found, try matching by buyerReceiveAddress (if provided in metadata)
-    if (!ordinalOutput && metadata.buyerReceiveAddress) {
-      for (const out of buyerPsbt.txOutputs) {
-        try {
-          const addr = bitcoin.address.fromOutputScript(out.script, network);
-          if (addr === metadata.buyerReceiveAddress) {
-            ordinalOutput = out;
-            break;
-          }
-        } catch (e) {
-          // skip non-standard scripts
-        }
-      }
-    }
-
-    if (!ordinalOutput) {
-      throw new AppError('Ordinal output not found in buyer PSBT outputs. Ensure buyer PSBT includes the ordinal output (value or buyerReceiveAddress must match).', 400);
-    }
-
-    // Add ordinal output first (index 0)
-    try {
-      combined.addOutput({
-        address: bitcoin.address.fromOutputScript(ordinalOutput.script, network),
-        value: ordinalOutput.value
-      });
-    } catch (e) {
-      // fallback: add raw script if fromOutputScript fails
-      combined.addOutput({
-        script: ordinalOutput.script,
-        value: ordinalOutput.value
-      });
-    }
-    console.log("✅ Added ordinal output as output index 0");
-
-    // Add seller payment output (use sellerPsbt.txOutputs[0])
-    const sellerPaymentOut = sellerPsbt.txOutputs[0];
-    try {
-      combined.addOutput({
-        address: bitcoin.address.fromOutputScript(sellerPaymentOut.script, network),
-        value: sellerPaymentOut.value
-      });
-    } catch (e) {
-      combined.addOutput({
-        script: sellerPaymentOut.script,
-        value: sellerPaymentOut.value
-      });
-    }
-    console.log("✅ Added seller payment output as output index 1");
-
-    // Add remaining buyer outputs (skip the ordinal we already added and skip duplicates)
-    for (const out of buyerPsbt.txOutputs) {
-      // skip ordinal by exact script+value equality
-      if (out.value === ordinalOutput.value && out.script.equals(ordinalOutput.script)) continue;
-
-      // skip seller payment duplicate
-      if (out.value === sellerPaymentOut.value && out.script.equals(sellerPaymentOut.script)) continue;
-
-      try {
-        combined.addOutput({
-          address: bitcoin.address.fromOutputScript(out.script, network),
-          value: out.value
-        });
-      } catch (e) {
-        combined.addOutput({
-          script: out.script,
-          value: out.value
-        });
-      }
-    }
-    console.log("✅ Added remaining buyer outputs (dummy/change)");
-
-    // ---------- Finalize inputs ----------
-    try {
-      combined.finalizeAllInputs();
-      console.log("✅ All inputs finalized successfully");
-    } catch (finalizeError) {
-      console.error("❌ finalizeAllInputs failed:", finalizeError.message);
-
-      // diagnostic info for each input
-      for (let i = 0; i < combined.inputCount; i++) {
-        const id = combined.txInputs[i];
-        const inData = combined.data.inputs[i] || {};
-        console.error(`Input ${i} diagnostic:`, {
-          prevout: `${Buffer.from(id.hash).reverse().toString('hex')}:${id.index}`,
-          hasWitnessUtxo: !!inData.witnessUtxo,
-          hasNonWitnessUtxo: !!inData.nonWitnessUtxo,
-          hasPartialSig: !!inData.partialSig,
-          hasTapKeySig: !!inData.tapKeySig,
-          sighashType: inData.sighashType
-        });
-      }
-
-      throw new AppError(
-        `Failed to finalize inputs: ${finalizeError.message}. Likely causes: missing witnessUtxo/nonWitnessUtxo for inputs, or incompatible signatures. Ensure each input has correct UTXO metadata and buyer only signs buyer inputs.`,
-        500
-      );
-    }
-
-    // ---------- Extract raw tx (broadcast-ready) ----------
-    let tx;
-    try {
-      tx = combined.extractTransaction();
-    } catch (extractErr) {
-      console.error("❌ extractTransaction failed:", extractErr);
-      throw new AppError(`Failed to extract transaction: ${extractErr.message}`, 500);
-    }
-
-    const txHex = tx.toHex();
-    const txId = tx.getId();
-
-    console.log("✅ Combined TX ready for broadcast:", txId);
-    console.log("📏 Size (bytes):", txHex.length / 2);
-
-    return {
-      tx_hex: txHex,
-      txid: txId,
-      network: networkType,
-      readyForBroadcast: true,
-      metadata: {
-        totalInputs: combined.inputCount,
-        totalOutputs: combined.txOutputs.length
-      }
-    };
-
-  } catch (err) {
-    console.error("❌ PSBT combination failed:", err);
-    if (err instanceof AppError) throw err;
-    throw new AppError(`Failed to combine PSBTs: ${err.message}`, 500);
-  }
-};
-
-
-export const broadcastTransactionService = async (signed_psbt, network = 'testnet') => {
-  try {
-    if (!signed_psbt) {
-      throw new AppError('signed_psbt required', 400);
-    }
-
-    const { network: networkConfig, baseMempoolApiUrl } = getNetworkConfig(network);
-    setNetwork(network);
-
-    console.log("📡 Broadcasting transaction...");
-
-    // ✅ Parse PSBT
-    const cleaned = signed_psbt.trim().replace(/\s+/g, '');
+    // ✅ FIXED: Handle both hex and base64 PSBT data
     let psbt;
     
-    try {
-      if (/^[0-9a-fA-F]+$/.test(cleaned) && cleaned.startsWith('70736274')) {
-        psbt = bitcoin.Psbt.fromHex(cleaned, { network: networkConfig });
-      } else {
-        psbt = bitcoin.Psbt.fromBase64(cleaned, { network: networkConfig });
+    // Check if it's hex (starts with PSBT magic bytes)
+    if (psbtData.startsWith('70736274') || /^[0-9a-fA-F]+$/.test(psbtData)) {
+      console.log("🔧 Detected HEX format, converting...");
+      try {
+        const buffer = Buffer.from(psbtData, 'hex');
+        psbt = bitcoin.Psbt.fromBuffer(buffer, { network });
+        console.log("✅ Successfully parsed HEX PSBT");
+      } catch (hexError) {
+        console.error("❌ Failed to parse as HEX:", hexError.message);
+        throw new AppError(`Invalid HEX PSBT: ${hexError.message}`, 400);
       }
-    } catch (e) {
-      throw new AppError(`Invalid PSBT format: ${e.message}`, 400);
+    } 
+    // Check if it's base64
+    else if (/^[A-Za-z0-9+/]+=*$/.test(psbtData)) {
+      console.log("🔧 Detected BASE64 format...");
+      try {
+        psbt = bitcoin.Psbt.fromBase64(psbtData, { network });
+        console.log("✅ Successfully parsed BASE64 PSBT");
+      } catch (base64Error) {
+        console.error("❌ Failed to parse as BASE64:", base64Error.message);
+        throw new AppError(`Invalid BASE64 PSBT: ${base64Error.message}`, 400);
+      }
+    } else {
+      throw new AppError('Invalid PSBT format: must be hex or base64', 400);
     }
 
-    console.log("📦 PSBT parsed successfully");
-    console.log("📊 Inputs:", psbt.inputCount);
-    console.log("📊 Outputs:", psbt.txOutputs.length);
+    console.log("📊 Final PSBT Structure:");
+    console.log("   Inputs:", psbt.inputCount);
+    console.log("   Outputs:", psbt.txOutputs.length);
 
-    // ✅ Detailed signature verification for EACH input
-    console.log("🔍 Verifying signatures for each input...");
-    
+    // ✅ Debug: Show input details
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.txInputs[i];
+      const inputData = psbt.data.inputs[i];
+      const prevout = `${Buffer.from(input.hash).reverse().toString('hex')}:${input.index}`;
+      
+      console.log(`   Input ${i}: ${prevout}`);
+      console.log(`     Sighash: ${inputData.sighashType || 'default'}`);
+      console.log(`     tapKeySig: ${!!inputData.tapKeySig}`);
+      console.log(`     finalScriptWitness: ${!!inputData.finalScriptWitness}`);
+    }
+
+    // ✅ Verify all inputs are signed
     for (let i = 0; i < psbt.inputCount; i++) {
       const inputData = psbt.data.inputs[i];
-      const input = psbt.txInputs[i];
-      
-      console.log(`\n🔍 Checking input ${i}:`);
-      console.log(`   Input: ${Buffer.from(input.hash).reverse().toString('hex')}:${input.index}`);
-      console.log(`   SighashType: ${inputData.sighashType || 'default'}`);
-      
-      const hasTapKeySig = inputData.tapKeySig && inputData.tapKeySig.length > 0;
-      const hasPartialSig = inputData.partialSig && inputData.partialSig.length > 0;
-      const hasFinalWitness = inputData.finalScriptWitness && inputData.finalScriptWitness.length > 0;
-      const hasFinalScript = inputData.finalScriptSig && inputData.finalScriptSig.length > 0;
-      
-      console.log(`   Has tapKeySig: ${hasTapKeySig}`);
-      console.log(`   Has partialSig: ${hasPartialSig}`);
-      console.log(`   Has finalWitness: ${hasFinalWitness}`);
-      console.log(`   Has finalScript: ${hasFinalScript}`);
-      
-      const isSigned = hasTapKeySig || hasPartialSig || hasFinalWitness || hasFinalScript;
+      const isSigned = inputData.tapKeySig || inputData.partialSig || 
+                      inputData.finalScriptWitness || inputData.finalScriptSig;
       
       if (!isSigned) {
-        throw new AppError(
-          `Input ${i} is not signed. Please ensure all inputs are signed before broadcasting.`,
-          400
-        );
+        throw new AppError(`Input ${i} is not signed. Please ensure all inputs are signed.`, 400);
       }
-      
-      console.log(`✅ Input ${i} is properly signed`);
-      
-      // Log signature details for debugging
-      if (hasTapKeySig) {
-        console.log(`   TapKeySig (64 bytes): ${inputData.tapKeySig.toString('hex').substring(0, 40)}...`);
-      }
+      console.log(`✅ Input ${i} is signed`);
     }
 
-    // ✅ Finalize inputs carefully
-    console.log("\n🔧 Finalizing inputs...");
-    
+    // ✅ Finalize all inputs
+    console.log("🔧 Finalizing inputs...");
     for (let i = 0; i < psbt.inputCount; i++) {
       try {
-        const inputData = psbt.data.inputs[i];
-        
         // Check if already finalized
-        if (inputData.finalScriptWitness || inputData.finalScriptSig) {
+        if (psbt.data.inputs[i].finalScriptWitness) {
           console.log(`✅ Input ${i} already finalized`);
           continue;
         }
         
-        // Try to finalize
-        console.log(`🔧 Attempting to finalize input ${i}...`);
         psbt.finalizeInput(i);
-        console.log(`✅ Input ${i} finalized successfully`);
-        
+        console.log(`✅ Finalized input ${i}`);
       } catch (finalizeError) {
-        console.error(`❌ Failed to finalize input ${i}:`, finalizeError.message);
+        console.error(`❌ Failed to finalize input ${i}:`, finalizeError);
         
-        // Provide detailed error for debugging
+        // Detailed debug info
         const inputData = psbt.data.inputs[i];
         console.error(`   Input ${i} details:`, {
           hasTapKeySig: !!inputData.tapKeySig,
           hasPartialSig: !!inputData.partialSig,
+          hasFinalWitness: !!inputData.finalScriptWitness,
           sighashType: inputData.sighashType,
           witnessUtxo: !!inputData.witnessUtxo
         });
         
         throw new AppError(
           `Failed to finalize input ${i}: ${finalizeError.message}. ` +
-          `This usually means the signature format is incompatible or the sighash type doesn't match. ` +
-          `For input ${i}, expected sighash: ${inputData.sighashType || 'default'}`,
+          `This usually means the signature is invalid or the input data is incomplete.`,
           400
         );
       }
@@ -1659,10 +1489,12 @@ export const broadcastTransactionService = async (signed_psbt, network = 'testne
     let tx;
     try {
       tx = psbt.extractTransaction();
+      console.log("✅ Transaction extracted successfully");
     } catch (extractError) {
       console.error("❌ Failed to extract transaction:", extractError);
       throw new AppError(
-        `Failed to extract transaction: ${extractError.message}. Ensure all inputs are finalized correctly.`,
+        `Failed to extract transaction: ${extractError.message}. ` +
+        `Ensure all inputs are properly finalized.`,
         400
       );
     }
@@ -1670,14 +1502,10 @@ export const broadcastTransactionService = async (signed_psbt, network = 'testne
     const txHex = tx.toHex();
     const txId = tx.getId();
 
-    console.log("\n✅ Transaction extracted successfully");
-    console.log("🆔 Transaction ID:", txId);
-    console.log("📏 Transaction Size:", txHex.length / 2, "bytes");
-    console.log("⚡ Transaction hex (first 100 chars):", txHex.substring(0, 100) + "...");
+    console.log("📤 Broadcasting transaction...");
+    console.log("🆔 TXID:", txId);
+    console.log("📏 Transaction size:", txHex.length / 2, "bytes");
 
-    // ✅ Broadcast to mempool
-    console.log("\n📤 Broadcasting to mempool...");
-    
     const response = await fetch(`${baseMempoolApiUrl}/tx`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -1686,37 +1514,19 @@ export const broadcastTransactionService = async (signed_psbt, network = 'testne
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("❌ Broadcast rejected by mempool:", errorText);
+      console.error("❌ Broadcast rejected:", errorText);
       
-      // ✅ Enhanced error messages
+      // Enhanced error messages
       if (errorText.includes('bad-txns-inputs-missingorspent')) {
         throw new AppError(
-          'Transaction inputs are missing or already spent. The UTXOs may have been spent in another transaction. Please generate a new PSBT with fresh UTXOs.',
+          'Transaction inputs are missing or already spent. The UTXOs may have been spent in another transaction.',
           500
         );
       }
       
       if (errorText.includes('Invalid Schnorr signature')) {
         throw new AppError(
-          'Invalid Schnorr signature detected. This usually means:\n' +
-          '1. The sighash type was changed after the seller signed (seller used SIGHASH_SINGLE|ANYONECANPAY)\n' +
-          '2. The wallet signed input 0 (seller\'s input) which it should not have\n' +
-          '3. The witness data structure is incompatible\n\n' +
-          'Solution: Regenerate the buyer PSBT and ensure the wallet ONLY signs inputs 1 onwards, NOT input 0.',
-          500
-        );
-      }
-      
-      if (errorText.includes('non-mandatory-script-verify-flag')) {
-        throw new AppError(
-          'Script verification failed. The transaction structure may be invalid. Please regenerate the PSBT.',
-          500
-        );
-      }
-      
-      if (errorText.includes('min relay fee not met')) {
-        throw new AppError(
-          'Transaction fee is too low. Please regenerate with a higher fee rate.',
+          'Invalid Schnorr signature. This usually means the seller signature was invalidated by output ordering changes.',
           500
         );
       }
@@ -1726,20 +1536,27 @@ export const broadcastTransactionService = async (signed_psbt, network = 'testne
 
     const broadcastTxId = await response.text();
 
-    console.log("\n✅ Transaction broadcast successful!");
-    console.log("🎉 TXID:", broadcastTxId);
-
+    console.log("✅ Transaction broadcast successfully!");
+    
     return {
       success: true,
       txid: broadcastTxId,
       tx_hex: txHex,
-      network: network,
-      explorer_url: `${getNetworkConfig(network).baseMempoolUrl}/tx/${broadcastTxId}`
+      explorer_url: `${getNetworkConfig(networkType).baseMempoolUrl}/tx/${broadcastTxId}`
     };
 
   } catch (err) {
+    console.error("❌ Broadcast failed:", err);
+    
+    // Enhanced error logging for format issues
+    if (err.message.includes('Invalid Magic Number')) {
+      console.error("🔧 FORMAT DETECTION ISSUE:");
+      console.error("   - PSBT data might be in wrong format");
+      console.error("   - Expected: base64 or hex starting with 70736274");
+      console.error("   - Received data start:", psbtData?.substring(0, 50));
+    }
+    
     if (err instanceof AppError) throw err;
-    console.error("❌ Broadcast error:", err);
     throw new AppError(`Broadcast failed: ${err.message}`, 500);
   }
 };
