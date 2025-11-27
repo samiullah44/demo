@@ -763,21 +763,21 @@ export const broadcastTransaction = async (req, res, next) => {
     console.log('🎯 Finalize & Broadcast Request Body:', JSON.stringify(req.body, null, 2));
     
     const { 
-      buyer_extended_psbt, 
+      psbt, 
       network = 'testnet' 
     } = req.body;
 
     // Validate required fields
-    if (!buyer_extended_psbt) {
+    if (!psbt) {
       throw new AppError('Missing buyer_extended_psbt in request body', 400);
     }
 
     console.log('✅ All required fields present');
-    console.log('📏 Buyer extended PSBT length:', buyer_extended_psbt.length);
+    console.log('📏 Buyer extended PSBT length:', psbt.length);
 
     // ✅ Finalize and broadcast the extended PSBT
     const result = await broadcastTransactionService(
-      buyer_extended_psbt,
+      psbt,
       network
     );
 

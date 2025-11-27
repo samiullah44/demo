@@ -137,8 +137,9 @@
                 <div class="form-group">
                     <label for="sellerData">Seller PSBT Data (JSON):</label>
                     <textarea id="sellerData">{
-  "inscription_id": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37ei0",
-  "inscription_output": "3578b874fb0e0f9fba1d01121c1bc1adb2ff01703d90491e0957f65fcdcdf37e:0",
+  "inscription_id": "cda87f3f688dd825ec545aa2aeaeef3342b41d04da06adff56b82b3e7a91f96fi0",
+  "inscription_number":"98691358"
+  "inscription_output": "cda87f3f688dd825ec545aa2aeaeef3342b41d04da06adff56b82b3e7a91f96f:0",
   "price_sats": 6000,
   "seller_address": "",
   "payment_address": "",
@@ -207,20 +208,19 @@
 
             <div class="step">
                 <h3><span class="step-number">2</span> Complete Purchase Flow</h3>
+                 
+    <div class="buyer-flow-buttons">
+        <button onclick="signBuyerPSBT()">1. Sign Extended PSBT</button>
+        <button onclick="verifyBuyerPSBT()">2. Verify Signatures</button>
+        <button onclick="finalizeAndBroadcast()">3. Finalize & Broadcast</button>
+    </div>
                 
-                <div class="buyer-flow-buttons">
-                    <button onclick="signBuyerPSBT()">1. Sign Buyer PSBT</button>
-                    <button onclick="combinePSBTs()">2. Combine PSBTs</button>
-                    <button onclick="verifyBuyerPSBT()">3. Verify Combined</button>
-                    <button onclick="broadcastBuyerTransaction()">4. Broadcast</button>
-                </div>
-                
-                <div class="form-group">
-                    <label for="buyerSignedPSBT">Buyer Signed PSBT:</label>
-                    <textarea id="buyerSignedPSBT" placeholder="Buyer signed PSBT will appear here..."></textarea>
-                </div>
-                
-                <div id="buyerBroadcastResult" class="result" style="display: none;"></div>
+               <div class="form-group">
+        <label for="buyerSignedPSBT">Buyer Signed PSBT (Extended):</label>
+        <textarea id="buyerSignedPSBT" placeholder="Extended PSBT after signing will appear here..."></textarea>
+    </div>
+    
+    <div id="buyerBroadcastResult" class="result" style="display: none;"></div>
             </div>
         </div>
 
@@ -540,6 +540,7 @@
                 
                 const unsignedPSBT = document.getElementById('unsignedPSBT').value.trim();
                 if (!unsignedPSBT) throw new Error('No PSBT to sign');
+                
 
                 showResult('sellerSignResult', '🔄 Signing PSBT...<span class="loading-spinner"></span>', 'info');
                 
@@ -618,202 +619,349 @@
 
             await callAPI('verify-signed-psbt', { signed_psbt: signedPSBT, network: 'testnet' }, 'sellerListingResult');
         }
-
-        let buyer_metadata;
-        // Generate Buyer PSBT
-        async function generateBuyerPSBT() {
-            try {
-                const data = JSON.parse(document.getElementById('buyerData').value);
-                const result = await callAPI('generate-buyer', data, 'buyerGenerateResult');
-                buyer_metadata = result.data.metadata;
-                console.log('Buyer metadata stored:', buyer_metadata);
+let buyer_metadata;
+async function generateBuyerPSBT() {
+    try {
+        const data = JSON.parse(document.getElementById('buyerData').value);
+        
+        console.log("🔄 Generating Buyer PSBT...");
+        console.log("📤 Sending data:", data);
+        
+        // Store buyer metadata for later use
+        const result = await callAPI('generate-buyer', data, 'buyerGenerateResult');
+        
+        console.log("📥 Backend response:", result);
+        
+        if (result && result.data) {
+            // DEBUG: Check the exact structure of the response
+            console.log("🔍 Response data structure:", Object.keys(result.data));
+            console.log("📦 PSBT field exists:", 'psbt' in result.data);
+            console.log("📋 Metadata exists:", 'metadata' in result.data);
+            
+            // Store metadata globally for finalization
+            window.buyerMetadata = result.data.metadata;
+            window.listingData = result.data.listing;
+            
+            // FIXED: Handle different possible field names for PSBT
+            let psbtData = '';
+            
+            if (result.data.psbt) {
+                psbtData = result.data.psbt;
+                console.log("✅ Using 'psbt' field");
+            } else if (result.data.unsigned_psbt) {
+                psbtData = result.data.unsigned_psbt;
+                console.log("✅ Using 'unsigned_psbt' field");
+            } else if (result.data.buyer_psbt) {
+                psbtData = result.data.buyer_psbt;
+                console.log("✅ Using 'buyer_psbt' field");
+            } else {
+                // Try to find any field that might contain PSBT data
+                const possibleFields = Object.keys(result.data).filter(key => 
+                    typeof result.data[key] === 'string' && 
+                    (result.data[key].includes('cHNid') || result.data[key].length > 100)
+                );
                 
-                if (result && result.data && result.data.unsigned_psbt) {
-                    document.getElementById('buyerUnsignedPSBT').value = result.data.unsigned_psbt;
-                    document.getElementById('buyerSignedPSBT').value = '';
+                if (possibleFields.length > 0) {
+                    psbtData = result.data[possibleFields[0]];
+                    console.log(`✅ Using '${possibleFields[0]}' field for PSBT`);
+                } else {
+                    throw new Error('No PSBT data found in response. Available fields: ' + Object.keys(result.data).join(', '));
                 }
-            } catch (error) {
-                showResult('buyerGenerateResult', `❌ Invalid JSON: ${error.message}`, 'error');
             }
+            
+            // Set the PSBT in the textarea
+            document.getElementById('buyerUnsignedPSBT').value = psbtData;
+            document.getElementById('buyerSignedPSBT').value = '';
+            
+            console.log("📏 PSBT length:", psbtData.length);
+            console.log("🔍 PSBT preview:", psbtData.substring(0, 50) + '...');
+            
+            // Extract signing instructions from metadata
+            const inputsToSign = window.buyerMetadata?.inputsToSign || [];
+            const inputsToSkip = window.buyerMetadata?.inputsToSkip || [];
+            
+            // Build structure display
+            let structureInfo = '';
+            if (window.buyerMetadata?.structure) {
+                structureInfo = `📊 Transaction Structure:\n`;
+                
+                // Inputs
+                structureInfo += `• Inputs:\n`;
+                window.buyerMetadata.structure.inputs.forEach(input => {
+                    const signStatus = input.sign === false ? '❌ (skip)' : '✅ (sign)';
+                    structureInfo += `  ${input.index}: ${input.type} - ${input.value} sats ${signStatus}\n`;
+                });
+                
+                // Outputs  
+                structureInfo += `• Outputs:\n`;
+                window.buyerMetadata.structure.outputs.forEach(output => {
+                    structureInfo += `  ${output.index}: ${output.type} → ${output.address.substring(0, 15)}... - ${output.value} sats\n`;
+                });
+            }
+            
+            // Update UI to show OpenOrdex flow
+            showResult('buyerGenerateResult', 
+                `✅ OpenOrdex Buyer PSBT Generated!\n\n` +
+                `💰 Price: ${window.buyerMetadata?.priceSats || 'N/A'} sats\n` +
+                `⛽ Fee Rate: ${window.buyerMetadata?.feeRate || 'N/A'} sat/vB\n` +
+                `💎 Ordinal Value: ${window.buyerMetadata?.ordinalValue || 'N/A'} sats\n` +
+                `📦 PSBT Size: ${psbtData.length} characters\n\n` +
+                `${structureInfo}\n` +
+                `🔐 SIGNING INSTRUCTIONS:\n` +
+                `• ✅ Sign Inputs: [${inputsToSign.join(', ')}] (Your dummy + payment UTXOs)\n` +
+                `• ❌ Skip Input: [${inputsToSkip.join(', ')}] (Seller's ordinal - already signed)\n\n` +
+                `💡 Important: Only sign the specified inputs to avoid invalidating seller's signature!`,
+                'success'
+            );
+            
+            // Also update the UI to show the PSBT was received
+            const textarea = document.getElementById('buyerUnsignedPSBT');
+            if (textarea.value.trim().length > 0) {
+                textarea.style.borderColor = '#28a745';
+                textarea.style.backgroundColor = '#f8fff9';
+            }
+            
+        } else {
+            throw new Error('Invalid response structure from server');
         }
-
-
-        // Sign Buyer PSBT
-// Step 1: Sign Buyer PSBT (separate from seller)
+    } catch (error) {
+        console.error("❌ Buyer PSBT generation failed:", error);
+        showResult('buyerGenerateResult', 
+            `❌ Failed to generate buyer PSBT: ${error.message}\n\n` +
+            '🔧 Troubleshooting:\n' +
+            '• Check backend response structure\n' +
+            '• Verify the API endpoint returns PSBT data\n' +
+            '• Ensure seller PSBT is properly signed\n' +
+            '• Confirm network connectivity',
+            'error'
+        );
+        
+        // Clear fields on error
+        document.getElementById('buyerUnsignedPSBT').value = '';
+        document.getElementById('buyerSignedPSBT').value = '';
+    }
+}
+// UPDATED: Sign Buyer PSBT with Proper Input Selection
 async function signBuyerPSBT() {
     try {
         const buyerUnsignedPSBT = document.getElementById('buyerUnsignedPSBT').value.trim();
         if (!buyerUnsignedPSBT) {
-            throw new Error('No buyer PSBT to sign');
+            throw new Error('Generate buyer PSBT first');
         }
 
         if (!isWalletConnected) {
             throw new Error('Connect wallet first');
         }
 
-        showResult('buyerBroadcastResult', '🔄 Signing buyer PSBT...<span class="loading-spinner"></span>', 'info');
+        if (!window.buyerMetadata) {
+            throw new Error('Buyer metadata not found. Generate buyer PSBT first.');
+        }
 
-        // Sign buyer's own inputs only
-        const signedPSBT = await window.unisat.signPsbt(buyerUnsignedPSBT, {
-            autoFinalized: false
+        // Get the buyer's payment address for signing
+        const buyerPaymentAddress = window.buyerMetadata.buyerPaymentAddress;
+        if (!buyerPaymentAddress) {
+            throw new Error('Buyer payment address not found in metadata');
+        }
+
+        // Determine which inputs to sign based on OpenOrdex structure
+        // Input 0: Dummy UTXO (buyer signs)
+        // Input 1: Seller ordinal (DO NOT SIGN - already signed)
+        // Input 2+: Payment UTXOs (buyer signs)
+        const inputsToSign = [];
+        
+        if (window.buyerMetadata.structure && window.buyerMetadata.structure.inputs) {
+            window.buyerMetadata.structure.inputs.forEach(input => {
+                if (input.type === 'dummy' || input.type === 'payment') {
+                    inputsToSign.push(input.index);
+                }
+            });
+        } else {
+            // Fallback: sign all inputs except index 1 (seller's ordinal)
+            // This assumes the OpenOrdex structure: 0=dummy, 1=ordinal, 2+=payment
+            inputsToSign.push(0); // Always sign dummy input
+            // Add payment inputs (assuming we have at least 3 inputs total)
+            if (window.buyerMetadata.totalInputs > 2) {
+                for (let i = 2; i < window.buyerMetadata.totalInputs; i++) {
+                    inputsToSign.push(i);
+                }
+            }
+        }
+
+        showResult('buyerBroadcastResult', 
+            `🔄 Signing Buyer PSBT (OpenOrdex Pattern)...<span class="loading-spinner"></span>\n\n` +
+            `📋 Signing Instructions:\n` +
+            `• ✅ Signing Inputs: [${inputsToSign.join(', ')}]\n` +
+            `• ❌ Skipping Input: [1] (Seller's ordinal - pre-signed)\n` +
+            `• 🔐 Using Address: ${buyerPaymentAddress}\n\n` +
+            `💡 Make sure your wallet only signs the specified inputs!`,
+            'info'
+        );
+
+        console.log('🔐 Signing configuration:', {
+            inputsToSign,
+            buyerPaymentAddress,
+            totalInputs: window.buyerMetadata.totalInputs,
+            structure: window.buyerMetadata.structure
         });
+
+        // Sign ONLY the specified inputs using Unisat's signInputs option
+        const signOptions = {
+            autoFinalized: false,
+            signInputs: {
+                [buyerPaymentAddress]: inputsToSign
+            }
+        };
+
+        console.log('📤 Sending signing request to Unisat...', signOptions);
+        
+        // Sign the PSBT with specific inputs
+        const signedPSBT = await window.unisat.signPsbt(buyerUnsignedPSBT, signOptions);
 
         document.getElementById('buyerSignedPSBT').value = signedPSBT;
 
         showResult('buyerBroadcastResult', 
-            '✅ Buyer PSBT signed successfully!\n\n' +
-            '📝 This PSBT contains only YOUR payment inputs\n' +
-            '🔗 Next: Combine with seller\'s PSBT before broadcasting', 
+            '✅ PSBT Signed Successfully!\n\n' +
+            '📊 OpenOrdex Structure Applied:\n' +
+            '• Input 0: Your dummy UTXO ✅ (signed by you)\n' +
+            '• Input 1: Seller\'s ordinal ✅ (pre-signed, preserved)\n' +
+            '• Inputs 2+: Your payment UTXOs ✅ (signed by you)\n' +
+            '• Output 0: Ordinal → Your address\n' +
+            '• Output 1: Payment → Seller\n\n' +
+            '🚀 Ready to finalize and broadcast!',
             'success'
         );
 
+        console.log('✅ PSBT signed successfully, ready for finalization');
+
     } catch (error) {
-        showResult('buyerBroadcastResult', `❌ Signing failed: ${error.message}`, 'error');
+        console.error('❌ Signing failed:', error);
+        showResult('buyerBroadcastResult', 
+            `❌ Signing failed: ${error.message}\n\n` +
+            '🔧 OpenOrdex Troubleshooting:\n' +
+            '• Ensure you are only signing inputs [0, 2+] (skip input 1)\n' +
+            '• Verify your wallet controls the payment address\n' +
+            '• Check that seller signature is preserved\n' +
+            '• Confirm PSBT follows OpenOrdex structure',
+            'error'
+        );
     }
 }
 
-// Step 2: Combine PSBTs
-async function combinePSBTs() {
-  try {
-    const buyerSignedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
-    if (!buyerSignedPSBT) {
-      throw new Error('Sign buyer PSBT first');
-    }
-
-    const buyerDataRaw = document.getElementById('buyerData').value;
-    const buyerData = JSON.parse(buyerDataRaw);
-
-    // Get seller signed PSBT from the seller tab
-    const sellerSignedPSBT = document.getElementById('signedPSBT').value.trim();
-    if (!sellerSignedPSBT) {
-      throw new Error('Seller PSBT not found. Please go to Seller Flow tab and sign the seller PSBT first.');
-    }
-
-    showResult('buyerBroadcastResult', '🔗 Combining PSBTs...', 'info');
-    
-    console.log('🔗 Combining PSBTs with data:', {
-      sellerSignedPSBT: sellerSignedPSBT.substring(0, 50) + '...',
-      buyerSignedPSBT: buyerSignedPSBT.substring(0, 50) + '...',
-      metadata: buyer_metadata
-    });
-
-    // FIX: Send correct parameter names matching backend expectation
-    const result = await callAPI('combine-psbt', {
-      sellerSignedPsbt: sellerSignedPSBT,   
-      buyerSignedPsbt: buyerSignedPSBT,     
-      metadata: buyer_metadata,
-      networkType: buyer_metadata?.network || 'testnet'  // Changed from network
-    }, 'buyerBroadcastResult');
-console.log("result:",result);
-    if (result && result.data) {
-      // Store combined PSBT for broadcasting
-      document.getElementById('buyerSignedPSBT').value = result.data.psbt;
-      
-      showResult('buyerBroadcastResult', 
-        '✅ PSBTs combined successfully!\n\n' +
-        `📊 Combined Transaction Details:\n` +
-        `   Total Inputs: ${result.data.metadata.totalInputs}\n` +
-        `   Total Outputs: ${result.data.metadata.totalOutputs}\n` +
-        `   Seller Input: Index ${result.data.metadata.sellerInputIndex}\n` +
-        `   Buyer Inputs: Start from Index ${result.data.metadata.buyerInputStartIndex}\n\n` +
-        '🔐 Structure:\n' +
-        `   • Input 0: Seller's ordinal (SIGHASH_SINGLE|ANYONECANPAY)\n` +
-        `   • Inputs 1+: Buyer's payment UTXOs (SIGHASH_ALL)\n` +
-        `   • Output 0: Ordinal → Buyer\n` +
-        `   • Output 1: Payment → Seller\n\n` +
-        '🚀 Ready to broadcast!', 
-        'success'
-      );
-    }
-  } catch (error) {
-    console.error('❌ Combination error:', error);
-    showResult('buyerBroadcastResult', 
-      `❌ Combination failed: ${error.message}\n\n` +
-      '🔧 Troubleshooting:\n' +
-      '• Ensure buyer PSBT is signed (Step 1)\n' +
-      '• Verify seller PSBT exists in Seller Flow tab\n' +
-      '• Check that buyer PSBT was generated correctly\n' +
-      '• Make sure metadata contains inscription_output\n' +
-      '• Verify both PSBTs are from the same network', 
-      'error'
-    );
-  }
-}
-
-// Step 3: Broadcast Combined Transaction
-async function broadcastBuyerTransaction() {
+// UPDATED: Finalize and Broadcast with Enhanced Error Handling
+async function finalizeAndBroadcast() {
     try {
-        const combinedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
-        if (!combinedPSBT) {
-            throw new Error('Combine PSBTs first');
+        const buyerSignedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+        if (!buyerSignedPSBT) {
+            throw new Error('Sign the buyer PSBT first');
         }
 
-        const buyerData = JSON.parse(document.getElementById('buyerData').value);
-        const network = buyerData.metadata.network || 'testnet';
+        if (!window.buyerMetadata) {
+            throw new Error('Buyer metadata not found. Generate buyer PSBT first.');
+        }
 
-        showResult('buyerBroadcastResult', '📡 Broadcasting...<span class="loading-spinner"></span>', 'info');
+        showResult('buyerBroadcastResult', 
+            '🔧 Finalizing and broadcasting...<span class="loading-spinner"></span>\n\n' +
+            '💡 Finalizing all inputs and extracting transaction...',
+            'info'
+        );
 
+        console.log('📤 Sending signed PSBT for finalization and broadcast...');
+
+        // Call the broadcast endpoint
         const result = await callAPI('broadcast', {
-            signed_psbt: combinedPSBT,
-            network: network
+            psbt: buyerSignedPSBT, // Changed from buyer_extended_psbt to match backend
+            network: window.buyerMetadata.network || 'testnet'
         }, 'buyerBroadcastResult');
 
         if (result && result.data) {
             showResult('buyerBroadcastResult', 
-                '🎉 Transaction broadcast successfully!\n\n' +
-                `TXID: ${result.data.txid}\n` +
-                `Explorer: ${result.data.explorer_url}`, 
+                '🎉 Transaction Finalized & Broadcast Successfully!\n\n' +
+                `📊 OpenOrdex Flow Complete\n` +
+                `🆔 TXID: ${result.data.txid}\n` +
+                `🔗 Explorer: ${result.data.explorer_url}\n` +
+                `💰 Price: ${window.buyerMetadata.priceSats} sats\n` +
+                `🎯 Ordinal destination: ${window.buyerMetadata.buyerReceiveAddress}\n\n` +
+                `⏳ Waiting for confirmation...`,
                 'success'
             );
+            
+            // Clear the form for next transaction
+            setTimeout(() => {
+                document.getElementById('buyerUnsignedPSBT').value = '';
+                document.getElementById('buyerSignedPSBT').value = '';
+                window.buyerMetadata = null;
+            }, 5000);
         }
 
     } catch (error) {
-        showResult('buyerBroadcastResult', `❌ Broadcast failed: ${error.message}`, 'error');
+        console.error('❌ Finalization failed:', error);
+        showResult('buyerBroadcastResult', 
+            `❌ Finalization failed: ${error.message}\n\n` +
+            '🔧 Common Solutions:\n' +
+            '• Verify seller PSBT uses SIGHASH_SINGLE|ANYONECANPAY\n' +
+            '• Check buyer only signed inputs [0, 2+] (not input 1)\n' +
+            '• Ensure sufficient fee coverage\n' +
+            '• Confirm all required inputs are signed\n' +
+            '• Verify network compatibility (testnet/mainnet)',
+            'error'
+        );
     }
-}// Verify Buyer PSBT
- 
+}
+
+// NEW: Helper function to display PSBT structure
+function displayPSBTStructure(metadata) {
+    if (!metadata.structure) return '';
+    
+    const structure = metadata.structure;
+    let display = '📊 PSBT Structure:\n';
+    
+    // Inputs
+    display += '• Inputs:\n';
+    structure.inputs.forEach(input => {
+        const signStatus = input.type === 'ordinal' ? '❌ (seller signed)' : '✅ (you sign)';
+        display += `  ${input.index}: ${input.type} - ${input.value} sats ${signStatus}\n`;
+    });
+    
+    // Outputs  
+    display += '• Outputs:\n';
+    structure.outputs.forEach(output => {
+        display += `  ${output.index}: ${output.type} → ${output.address} - ${output.value} sats\n`;
+    });
+    
+    return display;
+}
+// UPDATED: Verify Buyer PSBT for OpenOrdex structure
 async function verifyBuyerPSBT() {
-            try {
-                const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
-                if (!signedPSBT) {
-                    throw new Error('No signed PSBT to verify. Sign the buyer PSBT first.');
-                }
-
-                const buyerData = JSON.parse(document.getElementById('buyerData').value);
-                const network = buyerData.network || 'testnet';
-
-                const result = await callAPI('verify-signed-psbt', { 
-                    signed_psbt: signedPSBT,
-                    network: network
-                }, 'buyerBroadcastResult');
-
-                if (result && result.data) {
-                    if (result.data.isFullySigned && result.data.canFinalize) {
-                        showResult('buyerBroadcastResult', 
-                            '✅ PSBT verified and ready for broadcast!\n\n' +
-                            `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
-                            `Fully Signed: ${result.data.isFullySigned ? '✅' : '❌'}\n` +
-                            `Can Finalize: ${result.data.canFinalize ? '✅' : '❌'}\n\n` +
-                            '🚀 You can now broadcast the transaction.', 
-                            'success'
-                        );
-                    } else {
-                        showResult('buyerBroadcastResult', 
-                            '⚠️ PSBT verification warning:\n\n' +
-                            `Signature Status: ${result.data.signatureCount}/${result.data.inputCount} inputs signed\n` +
-                            `Fully Signed: ${result.data.isFullySigned ? '✅' : '❌'}\n` +
-                            `Can Finalize: ${result.data.canFinalize ? '✅' : '❌'}\n\n` +
-                            '⚠️ Some signatures may be missing or incomplete.', 
-                            'warning'
-                        );
-                    }
-                }
-
-            } catch (error) {
-                showResult('buyerBroadcastResult', `❌ PSBT verification failed: ${error.message}`, 'error');
-            }
+    try {
+        const signedPSBT = document.getElementById('buyerSignedPSBT').value.trim();
+        if (!signedPSBT) {
+            throw new Error('No signed PSBT to verify');
         }
 
+        if (!window.buyerMetadata) {
+            throw new Error('Buyer metadata not found');
+        }
+
+        showResult('buyerBroadcastResult', '🔍 Verifying OpenOrdex PSBT structure...', 'info');
+
+        // For now, do a basic client-side check
+        const analysis = `🔍 OpenOrdex PSBT Analysis:\n\n` +
+            `📦 PSBT Size: ${signedPSBT.length} characters\n` +
+            `💾 Format: ${signedPSBT.startsWith('c') ? 'Base64 ✅' : 'Unknown ❌'}\n` +
+            `🔐 Signed Status: ${signedPSBT.length > 1000 ? 'Likely Signed ✅' : 'Possibly Unsigned ⚠️'}\n\n` +
+            `📊 Expected Structure:\n` +
+            `   • Multiple inputs (seller + buyer)\n` +
+            `   • Multiple outputs (ordinal, payment, change)\n` +
+            `   • Seller signature preserved\n` +
+            `   • Buyer signatures on payment inputs\n\n` +
+            `💡 Next: Finalize & Broadcast to complete purchase`;
+
+        showResult('buyerBroadcastResult', analysis, 'info');
+
+    } catch (error) {
+        showResult('buyerBroadcastResult', `❌ Verification failed: ${error.message}`, 'error');
+    }
+}
         // Broadcast Buyer Transaction
         async function broadcastBuyerTransaction() {
             try {

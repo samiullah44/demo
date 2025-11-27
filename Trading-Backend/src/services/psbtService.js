@@ -1118,8 +1118,7 @@ export const normalizeSellerPSBT = (listing) => {
     );
   }
 };
-// ✅ SIMPLE FIX: Correct Ordinal Transfer (OpenOrdex Method)
-// ✅ CORRECTED: Buyer PSBT Generation (Preserves Seller Signature)
+// ✅ CORRECTED: Buyer PSBT Generation (OpenOrdex Pattern) - ERROR FIXED
 export const generateBuyerPSBT = async (
   listing,
   buyerPaymentAddress,
@@ -1128,9 +1127,9 @@ export const generateBuyerPSBT = async (
   feeLevel = 'hourFee'
 ) => {
   try {
-    const { network } = getNetworkConfig(networkType);
+    const { network, isTestnet } = getNetworkConfig(networkType);
     
-    console.log("🛒 Generating Buyer PSBT (Signature-Preserving)...");
+    console.log("🛒 Generating Buyer PSBT (OpenOrdex Pattern)...");
 
     // ✅ Validate addresses
     const paymentValidation = validateAddress(buyerPaymentAddress);
@@ -1143,7 +1142,7 @@ export const generateBuyerPSBT = async (
       throw new AppError(`Invalid buyer receive address: ${receiveValidation.error}`, 400);
     }
 
-    // ✅ Load seller's signed PSBT
+    // ✅ Load and validate seller's signed PSBT
     const sellerPsbtData = normalizeSellerPSBT(listing);
     const sellerPsbt = sellerPsbtData.psbt;
 
@@ -1158,14 +1157,14 @@ export const generateBuyerPSBT = async (
     const sellerPaymentAddress = bitcoin.address.fromOutputScript(sellerOutput.script, network);
     
     console.log("💰 Price:", priceSats, "sats");
-    console.log("📍 Seller address:", sellerPaymentAddress);
+    console.log("📍 Seller payment address:", sellerPaymentAddress);
 
-    // ✅ Verify SIGHASH
+    // ✅ Verify SIGHASH (CRITICAL: Must be SIGHASH_SINGLE | SIGHASH_ANYONECANPAY)
     const sellerInputData = sellerPsbt.data.inputs[0];
     const expectedSighash = bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY;
     
     if (sellerInputData.sighashType !== expectedSighash) {
-      throw new AppError('Seller must use SIGHASH_SINGLE|ANYONECANPAY', 400);
+      throw new AppError('Seller PSBT must use SIGHASH_SINGLE | SIGHASH_ANYONECANPAY for OpenOrdex compatibility', 400);
     }
 
     // ✅ Fetch ordinal UTXO details
@@ -1176,40 +1175,42 @@ export const generateBuyerPSBT = async (
     const sellerUtxo = sellerTx.outs[sellerInputIndex];
     const ordinalValue = sellerUtxo.value;
 
-    console.log("💎 Ordinal UTXO:", ordinalValue, "sats");
+    console.log("💎 Ordinal UTXO Value:", ordinalValue, "sats");
 
-    // ✅ Get buyer UTXOs and fee rate
-    const feeRates = await getRecommendedFeeRates(networkType);
-    const selectedFeeRate = feeRates[feeLevel];
+    // ✅ FIXED: Fee rate with fallback to prevent crashes
+    let selectedFeeRate;
+    try {
+      const feeRates = await getRecommendedFeeRates(networkType);
+      selectedFeeRate = feeRates[feeLevel];
+      console.log(`⛽ Using fee rate: ${selectedFeeRate} sat/vB`);
+    } catch (error) {
+      console.warn('❌ Fee rate fetch failed, using fallback rates:', error.message);
+      // Fallback fee rates
+      selectedFeeRate = networkType === 'testnet' ? 10 : 20;
+      console.log(`💡 Using fallback fee rate: ${selectedFeeRate} sat/vB`);
+    }
+
+    // ✅ Get buyer UTXOs
     const allBuyerUtxos = await fetchAddressUtxos(buyerPaymentAddress, networkType);
     
     if (!allBuyerUtxos.length) {
-      throw new Error('No UTXOs found for buyer');
+      throw new AppError('No UTXOs found for buyer payment address', 400);
     }
 
+    // ✅ Find or create dummy UTXO
     const existingDummy = await findDummyUtxo(allBuyerUtxos, networkType);
     const requiresNewDummy = !existingDummy;
 
-    let totalBuyerInput = 0;
+    // ========================================
+    // ✅ OPENORDEX PATTERN: Build PSBT from scratch
+    // ========================================
+    
+    console.log("🏗️ Building PSBT with OpenOrdex structure...");
+    const psbt = new bitcoin.Psbt({ network });
 
     // ========================================
-    // 🔴 CRITICAL FIX: Use Seller's PSBT as Base
+    // ✅ STEP 1: ADD DUMMY UTXO INPUT (Input 0)
     // ========================================
-    
-    console.log("🔗 Starting with seller's signed PSBT...");
-    
-    // ✅ Use seller's PSBT as the base (preserves signature)
-    const combinedPsbt = bitcoin.Psbt.fromBase64(sellerPsbt.toBase64(), { network });
-    
-    console.log("✅ Preserved seller's original structure:");
-    console.log(`   Input 0: ${sellerInputTxid}:${sellerInputIndex}`);
-    console.log(`   Output 0: ${sellerPaymentAddress} (${priceSats} sats)`);
-
-    // ========================================
-    // ✅ STEP 1: ADD DUMMY UTXO (Input 1)
-    // ========================================
-    
-    console.log("🔗 Step 1: Adding dummy UTXO...");
     
     let dummyUtxoValue = 0;
     if (existingDummy) {
@@ -1217,7 +1218,7 @@ export const generateBuyerPSBT = async (
       const dummyTx = bitcoin.Transaction.fromHex(dummyTxHex);
       const dummyUtxo = dummyTx.outs[existingDummy.vout];
 
-      combinedPsbt.addInput({
+      psbt.addInput({
         hash: existingDummy.txid,
         index: existingDummy.vout,
         witnessUtxo: {
@@ -1226,29 +1227,98 @@ export const generateBuyerPSBT = async (
         }
       });
       dummyUtxoValue = existingDummy.value;
-      totalBuyerInput += dummyUtxoValue;
-      console.log(`✅ Existing dummy: ${dummyUtxoValue} sats`);
+      console.log(`✅ Added existing dummy UTXO: ${dummyUtxoValue} sats`);
     }
 
     // ========================================
-    // ✅ STEP 2: ADD PAYMENT UTXOS (Input 2+)
+    // ✅ STEP 2: ADD SELLER'S ORDINAL INPUT (Input 1) - FIXED SIGNATURE PRESERVATION
     // ========================================
     
-    console.log("🔗 Step 2: Adding payment UTXOs...");
+    console.log("🔗 Adding seller's ordinal input...");
+
+    // ✅ FIXED: Robust signature preservation that handles different signature formats
+    const sellerInputConfig = {
+      hash: sellerInput.hash,
+      index: sellerInput.index,
+      witnessUtxo: sellerInputData.witnessUtxo,
+      sighashType: sellerInputData.sighashType,
+      // Preserve seller's signature data
+      tapKeySig: sellerInputData.tapKeySig,
+    };
+
+    // ✅ FIXED: Only add finalScriptWitness if it exists and is a Buffer
+    if (sellerInputData.finalScriptWitness && Buffer.isBuffer(sellerInputData.finalScriptWitness)) {
+      sellerInputConfig.finalScriptWitness = sellerInputData.finalScriptWitness;
+      console.log("✅ Preserved finalScriptWitness");
+    } else if (sellerInputData.tapKeySig) {
+      console.log("✅ Preserved tapKeySig (signature in key path)");
+    } else {
+      // Check for partialSig as fallback
+      if (sellerInputData.partialSig && sellerInputData.partialSig.length > 0) {
+        sellerInputConfig.partialSig = sellerInputData.partialSig;
+        console.log("✅ Preserved partialSig");
+      } else {
+        console.log("⚠️ No signature data found in seller PSBT - this may cause issues");
+      }
+    }
+
+    // ✅ Add the input with conditional signature data
+    psbt.addInput(sellerInputConfig);
+
+    console.log(`✅ Added seller ordinal input: ${sellerInputTxid}:${sellerInputIndex}`);
+
+    // ========================================
+    // ✅ STEP 3: ADD ORDINAL OUTPUT (Output 0) - BUYER GETS INSCRIPTION HERE
+    // ========================================
     
-    const { utxos: paymentUtxos } = await selectPaymentUtxos(
+    console.log("🎯 Adding ordinal output to buyer...");
+    let ordinalOutputValue = dummyUtxoValue + ordinalValue;
+    // CRITICAL: This output gets the inscription (first output)
+    psbt.addOutput({
+      address: buyerReceiveAddress,
+      value: ordinalOutputValue
+    });
+
+    console.log(`✅ Output 0: Ordinal → ${buyerReceiveAddress} (${ordinalOutputValue} sats)`);
+
+    // ========================================
+    // ✅ STEP 4: ADD SELLER PAYMENT OUTPUT (Output 1)
+    // ========================================
+    
+    console.log("💰 Adding seller payment output...");
+    
+    // CRITICAL: This matches what seller signed (SIGHASH_SINGLE for output at index 1)
+    psbt.addOutput({
+      address: sellerPaymentAddress,
+      value: priceSats
+    });
+
+    console.log(`✅ Output 1: Payment → ${sellerPaymentAddress} (${priceSats} sats)`);
+
+    // ========================================
+    // ✅ STEP 5: ADD PAYMENT UTXO INPUTS (Inputs 2+)
+    // ========================================
+    
+    console.log("💳 Adding buyer payment UTXOs...");
+    
+    const requiredPayment = priceSats + (requiresNewDummy ? DUMMY_UTXO_VALUE : 0);
+    const { utxos: paymentUtxos, totalValue: totalPaymentValue } = await selectPaymentUtxos(
       allBuyerUtxos,
-      priceSats + (requiresNewDummy ? DUMMY_UTXO_VALUE : 0),
-      selectedFeeRate * 500,
+      requiredPayment,
+      selectedFeeRate * 500, // Buffer for fees
       networkType
     );
 
+    let totalBuyerInput = dummyUtxoValue;
+    const paymentInputIndices = [];
+    
     for (const utxo of paymentUtxos) {
       const utxoTxHex = await getTransactionHex(utxo.txid, networkType);
       const utxoTx = bitcoin.Transaction.fromHex(utxoTxHex);
       const utxoOut = utxoTx.outs[utxo.vout];
 
-      combinedPsbt.addInput({
+      const inputIndex = psbt.inputCount;
+      psbt.addInput({
         hash: utxo.txid,
         index: utxo.vout,
         witnessUtxo: {
@@ -1256,103 +1326,108 @@ export const generateBuyerPSBT = async (
           value: utxoOut.value
         }
       });
+      
       totalBuyerInput += utxo.value;
+      paymentInputIndices.push(inputIndex);
     }
-    
-    console.log(`✅ Added ${paymentUtxos.length} payment UTXOs: ${totalBuyerInput} sats`);
+
+    console.log(`✅ Added ${paymentUtxos.length} payment UTXOs: ${totalBuyerInput - dummyUtxoValue} sats`);
 
     // ========================================
-    // 🔴 CRITICAL FIX: ORDINAL TRANSFER STRATEGY
+    // ✅ STEP 6: ADD NEW DUMMY UTXO OUTPUT (Output 2) if needed
     // ========================================
-    //
-    // Since we can't change Output 0 (seller signed it),
-    // we need a different approach for ordinal transfer.
-    //
-    // SOLUTION: Create a new output that receives the ordinal
-    // by using the "first satoshi" allocation rules.
-    //
-    // SATOSHI ALLOCATION:
-    // Input 0 (ordinal) → First available output
-    // Since Output 0 is already "filled" by padding UTXOs,
-    // the ordinal sats overflow to Output 1 (buyer's address)
-    //
-    // We need enough padding sats to fill Output 0 completely
-    // so the ordinal sats go to Output 1 instead.
     
-    console.log("\n📤 Step 3: Setting up ordinal transfer outputs...");
-
-    // ✅ OUTPUT 1: ORDINAL TO BUYER (This gets the inscription!)
-    // The ordinal from Input 0 will overflow to this output
-    // because Output 0 is already filled by padding UTXOs
-    const ordinalOutputValue = ordinalValue + (existingDummy ? existingDummy.value : DUMMY_UTXO_VALUE);
-    
-    combinedPsbt.addOutput({
-      address: buyerReceiveAddress,  // ⬅️ BUYER GETS ORDINAL HERE
-      value: ordinalOutputValue
-    });
-    console.log(`🎯 Output 1: ORDINAL → ${buyerReceiveAddress} (${ordinalOutputValue} sats)`);
-    console.log(`   ↳ Ordinal will transfer here via sat overflow`);
-
-    // ✅ OUTPUT 2: NEW DUMMY UTXO (if needed)
     if (requiresNewDummy) {
-      combinedPsbt.addOutput({
+      psbt.addOutput({
         address: buyerPaymentAddress,
         value: DUMMY_UTXO_VALUE
       });
-      console.log(`✅ Output 2: New dummy (${DUMMY_UTXO_VALUE} sats)`);
+      console.log(`✅ Output 2: New dummy UTXO (${DUMMY_UTXO_VALUE} sats)`);
     }
 
     // ========================================
-    // ✅ STEP 4: CALCULATE FEE AND CHANGE
+    // ✅ STEP 7: CALCULATE FEE AND ADD CHANGE OUTPUT
     // ========================================
     
+    console.log("🧮 Calculating fee and change...");
+    
+    const totalInputValue = totalBuyerInput + ordinalValue;
+    const currentOutputsValue = psbt.txOutputs.reduce((sum, out) => sum + out.value, 0);
+    
+    // Estimate fee based on current transaction size
     const estimatedFee = calculateFee(
-      combinedPsbt.inputCount,
-      combinedPsbt.txOutputs.length + 1, // +1 for change
+      psbt.inputCount,
+      psbt.txOutputs.length + 1, // +1 for potential change output
       selectedFeeRate,
       true
     );
 
-    const totalInputValue = totalBuyerInput + ordinalValue;
-    const totalOutputValue = combinedPsbt.txOutputs.reduce((sum, out) => sum + out.value, 0);
-    const changeAmount = totalInputValue - totalOutputValue - estimatedFee;
+    const changeAmount = totalInputValue - currentOutputsValue - estimatedFee;
     
     console.log("\n💰 Transaction Balance:");
-    console.log(`   Total inputs: ${totalInputValue} sats`);
-    console.log(`   Total outputs: ${totalOutputValue} sats`);
-    console.log(`   Fee: ${estimatedFee} sats`);
-    console.log(`   Change: ${changeAmount} sats`);
+    console.log(`   Total Inputs: ${totalInputValue} sats`);
+    console.log(`   Current Outputs: ${currentOutputsValue} sats`);
+    console.log(`   Estimated Fee: ${estimatedFee} sats`);
+    console.log(`   Available Change: ${changeAmount} sats`);
 
     if (changeAmount < 0) {
-      throw new Error(`Insufficient funds. Need ${Math.abs(changeAmount)} more sats`);
+      throw new AppError(
+        `Insufficient funds. Need ${Math.abs(changeAmount)} more sats.\n` +
+        `Available: ${totalBuyerInput} sats, Required: ${priceSats + estimatedFee + (requiresNewDummy ? DUMMY_UTXO_VALUE : 0)} sats`,
+        400
+      );
     }
 
+    // Add change output if sufficient dust
     if (changeAmount >= 546) {
-      combinedPsbt.addOutput({
+      psbt.addOutput({
         address: buyerPaymentAddress,
         value: changeAmount
       });
       console.log(`✅ Change output: ${changeAmount} sats`);
+    } else if (changeAmount > 0) {
+      console.log(`⚠️ Change amount ${changeAmount} sats below dust limit, adding to fee`);
     }
 
-    const finalPsbtBase64 = combinedPsbt.toBase64();
-
+    // ========================================
+    // ✅ FINAL VALIDATION AND METADATA PREPARATION
+    // ========================================
+    
+    const finalPsbtBase64 = psbt.toBase64();
+    
+    // Determine which inputs the buyer should sign
+    const inputsToSign = [0]; // Always sign dummy input (index 0)
+    inputsToSign.push(...paymentInputIndices); // Add all payment input indices
+    
     console.log("\n✅ ========================================");
-    console.log("✅ SIGNATURE-PRESERVING PSBT GENERATED!");
+    console.log("✅ OPENORDEX-COMPATIBLE PSBT GENERATED!");
     console.log("✅ ========================================");
     console.log("📊 Final Structure:");
-    console.log(`   Inputs (${combinedPsbt.inputCount} total):`);
-    console.log(`   - Input 0: Seller ordinal (${ordinalValue} sats) ← PRESERVED SIGNATURE`);
-    console.log(`   - Input 1: Dummy UTXO (${dummyUtxoValue} sats)`);
-    console.log(`   - Input 2+: Payment UTXOs (${totalBuyerInput - dummyUtxoValue} sats)`);
-    console.log(`   Outputs (${combinedPsbt.txOutputs.length} total):`);
-    console.log(`   - Output 0: Seller payment (${priceSats} sats) ← PRESERVED FROM SELLER`);
-    console.log(`   - Output 1: ORDINAL → Buyer (${ordinalOutputValue} sats) ← GETS INSCRIPTION`);
-    console.log(`   - Output 2+: Dummy/Change`);
+    console.log(`   Inputs (${psbt.inputCount} total):`);
+    console.log(`   - Input 0: Dummy UTXO (${dummyUtxoValue} sats) ← BUYER SIGNS`);
+    console.log(`   - Input 1: Seller ordinal (${ordinalValue} sats) ← SELLER SIGNED (DO NOT TOUCH)`);
+    
+    paymentInputIndices.forEach((inputIndex, i) => {
+      console.log(`   - Input ${inputIndex}: Payment UTXO ${i+1} (${paymentUtxos[i].value} sats) ← BUYER SIGNS`);
+    });
+    
+    console.log(`   Outputs (${psbt.txOutputs.length} total):`);
+    console.log(`   - Output 0: ORDINAL → ${buyerReceiveAddress} (${ordinalOutputValue} sats) ← BUYER GETS INSCRIPTION`);
+    console.log(`   - Output 1: Payment → ${sellerPaymentAddress} (${priceSats} sats) ← SELLER GETS PAYMENT`);
+    
+    for (let i = 2; i < psbt.txOutputs.length; i++) {
+      const output = psbt.txOutputs[i];
+      const address = bitcoin.address.fromOutputScript(output.script, network);
+      console.log(`   - Output ${i}: ${address} (${output.value} sats)`);
+    }
+    
     console.log("\n🎯 ORDINAL TRANSFER MECHANISM:");
-    console.log("   Seller's signature preserved (Output 0 unchanged)");
-    console.log("   Ordinal transfers to Output 1 via sat overflow");
-    console.log("   Buyer receives inscription in Output 1");
+    console.log("   Output 0 receives inscription (first available output)");
+    console.log("   Output 1 receives payment (seller signed for this index)");
+    console.log("   Seller signature preserved (SIGHASH_SINGLE for output 1)");
+    console.log("🔐 SIGNING INSTRUCTIONS:");
+    console.log(`   Buyer signs inputs: [${inputsToSign.join(', ')}]`);
+    console.log(`   Buyer skips input: [1] (seller's ordinal)`);
     console.log("✅ ========================================\n");
     
     return {
@@ -1365,25 +1440,44 @@ export const generateBuyerPSBT = async (
         buyerReceiveAddress,
         feeRate: selectedFeeRate,
         estimatedFee,
+        inputsToSign: inputsToSign,
+        inputsToSkip: [1], // Seller's ordinal input (DO NOT SIGN)
+        totalInputs: psbt.inputCount,
         totalInput: totalInputValue,
         changeAmount: changeAmount >= 546 ? changeAmount : 0,
         sellerSignaturePreserved: true,
-        ordinalTransfer: {
-          mechanism: 'Sat Overflow',
-          from: `Input 0 (seller ordinal)`,
-          to: `Output 1 → ${buyerReceiveAddress}`,
-          note: "Ordinal transfers to first available output after seller's payment"
+        structure: {
+          inputs: [
+            { index: 0, type: 'dummy', value: dummyUtxoValue, sign: true },
+            { index: 1, type: 'ordinal', value: ordinalValue, sign: false },
+            ...paymentUtxos.map((utxo, i) => ({ 
+              index: paymentInputIndices[i], 
+              type: 'payment', 
+              value: utxo.value,
+              sign: true 
+            }))
+          ],
+          outputs: [
+            { index: 0, type: 'ordinal_transfer', address: buyerReceiveAddress, value: ordinalOutputValue },
+            { index: 1, type: 'seller_payment', address: sellerPaymentAddress, value: priceSats },
+            ...(requiresNewDummy ? [{ index: 2, type: 'new_dummy', address: buyerPaymentAddress, value: DUMMY_UTXO_VALUE }] : []),
+            ...(changeAmount >= 546 ? [{ 
+              index: psbt.txOutputs.length - 1, 
+              type: 'change', 
+              address: buyerPaymentAddress, 
+              value: changeAmount 
+            }] : [])
+          ]
         }
       }
     };
 
   } catch (err) {
-    console.error("❌ PSBT generation failed:", err);
-    throw new Error(`Failed to generate buyer PSBT: ${err.message}`);
+    console.error("❌ Buyer PSBT generation failed:", err);
+    if (err instanceof AppError) throw err;
+    throw new AppError(`Failed to generate buyer PSBT: ${err.message}`, 500);
   }
 };
-
-// NEW: Simple finalization instead of complex combination
 export const broadcastTransactionService = async (
   psbtData, // Changed from buyerExtendedPsbtBase64 to generic psbtData
   networkType = 'testnet'
@@ -1561,6 +1655,71 @@ export const broadcastTransactionService = async (
   }
 };
 
+
+// NEW: UTXO Validation Function
+async function validateInputUTXOs(psbt, networkType = 'testnet') {
+  const { baseMempoolApiUrl } = getNetworkConfig(networkType);
+  const validationResult = {
+    allUnspent: true,
+    spentUtxos: [],
+    unspentUtxos: []
+  };
+
+  console.log("🔍 Checking UTXO status for all inputs...");
+  
+  for (let i = 0; i < psbt.inputCount; i++) {
+    const input = psbt.txInputs[i];
+    const txid = Buffer.from(input.hash).reverse().toString('hex');
+    const vout = input.index;
+    const utxoString = `${txid}:${vout}`;
+    
+    try {
+      // Check if UTXO is spent using mempool.space API
+      const response = await fetch(`${baseMempoolApiUrl}/tx/${txid}/outspend/${vout}`);
+      
+      if (response.ok) {
+        const spendData = await response.json();
+        
+        if (spendData.spent) {
+          validationResult.allUnspent = false;
+          validationResult.spentUtxos.push({
+            index: i,
+            txid,
+            vout,
+            spentBy: spendData.txid || 'unknown'
+          });
+          console.log(`❌ Input ${i}: ${utxoString} - ALREADY SPENT`);
+        } else {
+          validationResult.unspentUtxos.push({
+            index: i,
+            txid,
+            vout
+          });
+          console.log(`✅ Input ${i}: ${utxoString} - UNSPENT`);
+        }
+      } else {
+        console.warn(`⚠️  Could not check UTXO status for ${utxoString}`);
+        // If we can't check, assume it's unspent but log warning
+        validationResult.unspentUtxos.push({
+          index: i,
+          txid,
+          vout,
+          status: 'unknown'
+        });
+      }
+    } catch (error) {
+      console.warn(`⚠️  Error checking UTXO ${utxoString}:`, error.message);
+      validationResult.unspentUtxos.push({
+        index: i,
+        txid,
+        vout,
+        status: 'check_failed'
+      });
+    }
+  }
+  
+  return validationResult;
+}
 export const generateSellerPSBTSimple = async (
   inscriptionId,
   inscriptionOutput,
