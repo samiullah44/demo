@@ -13,10 +13,12 @@ import WalletConnect from "./components/WalletConnect"
 import { useThemeStore } from "./store/useThemeStore";
 import { useAuthStore } from "./store/useAuthStore";
 import Collections from "./pages/Collections"
-import {Toaster} from "react-hot-toast"
+import toast, {Toaster} from "react-hot-toast"
 import InscriptionDetail from './pages/InscriptionDetail';
 import CollectionDetail from './pages/CollectionDetail';
 import Leaderboard from "./components/Leaderboard";
+import useWalletStore from "./store/useWalletStore";
+
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { authUser, isCheckingAuth } = useAuthStore();
@@ -33,6 +35,28 @@ const ProtectedRoute = ({ children }) => {
   if (!authUser) {
     // Redirect to login page with return url
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+};
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [pathname]);
+
+  return null;
+};
+
+function WalletProtectedRoute({ children }) {
+  const { walletAddress } = useWalletStore();
+  const location = useLocation();
+
+  if (!walletAddress) {
+    toast.error("Connect Wallet!!")
+    return <Navigate to="/connect-wallet" state={{ from: location }} replace />;
   }
 
   return children;
@@ -106,9 +130,9 @@ function AppContent() {
             </ProtectedRoute>
           } />
           <Route path="/portfolio" element={
-            <ProtectedRoute>
+            <WalletProtectedRoute>
               <Portfolio />
-            </ProtectedRoute>
+            </WalletProtectedRoute>
           } />
           <Route path="/profile" element={
             <ProtectedRoute>
@@ -173,6 +197,7 @@ function AppContent() {
 function App() {
   return (
     <Router>
+       <ScrollToTop />
       <AppContent />
     </Router>
   );

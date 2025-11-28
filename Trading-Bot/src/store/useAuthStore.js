@@ -16,19 +16,36 @@ export const useAuthStore = create(
         try {
           const res = await axiosInstance.get("/user/check");
           if (res.data) {
-            set({ authUser: res.data });
+            // ✅ FIXED: Use functional update
+            set((state) => ({ 
+              ...state, 
+              authUser: res.data 
+            }));
           }
         } catch (error) {
           console.error("Auth check failed:", error);
-          set({ authUser: null });
+          // ✅ FIXED: Only clear if it's an auth error, not network error
+          if (error.response?.status === 401) {
+            set((state) => ({ 
+              ...state, 
+              authUser: null 
+            }));
+          }
         } finally {
-          set({ isCheckingAuth: false });
+          set((state) => ({ 
+            ...state, 
+            isCheckingAuth: false 
+          }));
         }
       },
 
       // Auth method for login/OTP flow
       auth: async (data) => {
-        set({ isLogingIng: true });
+        set((state) => ({ 
+          ...state, 
+          isLogingIng: true 
+        }));
+        
         try {
           const res = await axiosInstance.post("/user/auth", data);
           
@@ -39,8 +56,11 @@ export const useAuthStore = create(
               message: res.data.message 
             };
           } else {
-            // Set user data immediately after successful login
-            set({ authUser: res.data.user });
+            // ✅ FIXED: Use functional update with proper state merging
+            set((state) => ({ 
+              ...state, 
+              authUser: res.data.user 
+            }));
             toast.success("Logged in successfully");
             return { 
               success: true, 
@@ -53,16 +73,27 @@ export const useAuthStore = create(
           toast.error(errorMessage);
           throw new Error(errorMessage);
         } finally {
-          set({ isLogingIng: false });
+          set((state) => ({ 
+            ...state, 
+            isLogingIng: false 
+          }));
         }
       },
 
       // Verify OTP and create account
       verifyOtp: async (data) => {
-        set({ isSigningUp: true });
+        set((state) => ({ 
+          ...state, 
+          isSigningUp: true 
+        }));
+        
         try {
           const res = await axiosInstance.post("/user/verify", data);
-          set({ authUser: res.data.user });
+          // ✅ FIXED: Use functional update
+          set((state) => ({ 
+            ...state, 
+            authUser: res.data.user 
+          }));
           toast.success("Account created successfully");
           return { 
             success: true, 
@@ -74,7 +105,10 @@ export const useAuthStore = create(
           toast.error(errorMessage);
           throw new Error(errorMessage);
         } finally {
-          set({ isSigningUp: false });
+          set((state) => ({ 
+            ...state, 
+            isSigningUp: false 
+          }));
         }
       },
 
@@ -89,7 +123,12 @@ export const useAuthStore = create(
           isWalletUser: true,
           created_at: new Date().toISOString(),
         };
-        set({ authUser: user });
+        // ✅ FIXED: Use functional update
+        set((state) => ({ 
+          ...state, 
+          authUser: user 
+        }));
+        toast.success("Wallet connected successfully");
         return user;
       },
 
@@ -99,30 +138,61 @@ export const useAuthStore = create(
         } catch (error) {
           console.error("Logout error:", error);
         } finally {
-          set({ authUser: null });
+          // ✅ FIXED: Use functional update and add small delay for state propagation
+          setTimeout(() => {
+            set((state) => ({ 
+              ...state, 
+              authUser: null 
+            }));
+          }, 10);
           toast.success("Logged out successfully");
         }
       },
 
       updateProfile: async (data) => {
-        set({ isUpdatingProfile: true });
+        set((state) => ({ 
+          ...state, 
+          isUpdatingProfile: true 
+        }));
+        
         try {
           const res = await axiosInstance.put("/user/update-profile", data);
-          set({ authUser: res.data });
+          set((state) => ({ 
+            ...state, 
+            authUser: res.data 
+          }));
           toast.success("Profile updated successfully");
         } catch (error) {
           toast.error(error.response?.data?.message);
         } finally {
-          set({ isUpdatingProfile: false });
+          set((state) => ({ 
+            ...state, 
+            isUpdatingProfile: false 
+          }));
         }
       },
 
       // Helper methods
-      setAuthUser: (user) => set({ authUser: user }),
+      setAuthUser: (user) => set((state) => ({ 
+        ...state, 
+        authUser: user 
+      })),
       clearError: () => {},
+      
+      // ✅ NEW: Force state refresh method
+      forceRefresh: () => {
+        // This forces Zustand to notify all subscribers
+        set((state) => ({ ...state }));
+      },
     }),
     {
       name: "auth-storage",
+      // ✅ FIXED: Add version for migrations
+      version: 1,
+      // ✅ FIXED: Add partialize to control what gets persisted
+      partialize: (state) => ({
+        authUser: state.authUser,
+      }),
     }
   )
 );
