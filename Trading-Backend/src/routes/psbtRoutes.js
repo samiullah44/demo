@@ -10,13 +10,12 @@ import {
   decodePSBT,
   signPSBTWithWallet,
   verifySignedPSBT,
-  broadcastTransaction
+  broadcastTransaction,
+  emergencyIndexCleanup
 } from '../controllers/psbtController.js';
 import {
   signDummyUtxoPSBT,
-  broadcastDummyUtxoTransaction,
   getDummyUtxoTransactionStatus,
-  createDummyUtxoComplete
 } from '../services/psbtService.js';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -86,6 +85,23 @@ router.post('/generate-seller-simple', generateSellerPSBTSimple);
  *   network?: 'testnet' | 'mainnet'
  * }
  */
+// Add emergency route
+router.post('/emergency-cleanup', async (req, res) => {
+  try {
+    const result = await emergencyIndexCleanup();
+    res.json({
+      success: true,
+      message: 'Emergency cleanup completed',
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Emergency cleanup failed',
+      message: error.message
+    });
+  }
+});
 router.post('/create-listing', (req, res, next) => {
   // Add the isForListing option
   req.isForListing = true;
@@ -117,66 +133,6 @@ router.post('/sign-dummy-utxo', async (req, res, next) => {
     res.json({
       success: true,
       message: 'Dummy UTXO PSBT signed successfully',
-      data: result
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * Broadcast dummy UTXO transaction
- * Body: { signed_psbt, network? }
- */
-router.post('/broadcast-dummy-utxo', async (req, res, next) => {
-  try {
-    const { signed_psbt, network = 'testnet' } = req.body;
-
-    if (!signed_psbt) {
-      throw new AppError('signed_psbt is required', 400);
-    }
-
-    const result = await broadcastDummyUtxoTransaction(signed_psbt, network);
-
-    res.json({
-      success: true,
-      message: 'Dummy UTXO transaction broadcasted successfully',
-      data: result
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * Complete dummy UTXO creation (all in one)
- * Body: { payer_address, number_of_dummy_utxos?, network?, fee_level? }
- */
-router.post('/create-dummy-utxo-complete', async (req, res, next) => {
-  try {
-    const {
-      payer_address,
-      number_of_dummy_utxos = 1,
-      network = 'testnet',
-      fee_level = 'hourFee'
-    } = req.body;
-
-    if (!payer_address) {
-      throw new AppError('payer_address is required', 400);
-    }
-
-    const result = await createDummyUtxoComplete(
-      payer_address,
-      number_of_dummy_utxos,
-      network,
-      fee_level
-    );
-
-    res.json({
-      success: true,
-      message: `Dummy UTXO creation completed successfully! Created ${number_of_dummy_utxos} dummy UTXO(s).`,
       data: result
     });
 
